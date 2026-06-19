@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = load_config(&config_path);
 
-    // 3. Inject keys/endpoints dynamically into environment before initializing Client
+    // 3. Inject keys dynamically into environment before initializing Client
     if let Some(key) = &config.api_key {
         let env_var = match config.provider.as_deref().unwrap_or("openai") {
             "gemini" => "GEMINI_API_KEY",
@@ -89,17 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if let Some(endpoint) = &config.endpoint {
-        let env_var = match config.provider.as_deref().unwrap_or("openai") {
-            _ => "OPENAI_API_BASE",
-        };
-        unsafe {
-            std::env::set_var(env_var, endpoint);
-        }
-    }
-
-    // 4. Initialize GenAI Client with a custom model mapper to route custom models
-    // to the correct provider adapter (overriding the default prefix fallback to Ollama).
+    // 4. Initialize GenAI Client with a custom model mapper and service target resolver
     let provider = config.provider.clone().unwrap_or_else(|| "openai".to_string());
     
     let model_mapper = genai::resolver::ModelMapper::from_mapper_fn(move |model_iden: genai::ModelIden| {
@@ -117,8 +107,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    let custom_endpoint = config.endpoint.clone();
+    let target_resolver = genai::resolver::ServiceTargetResolver::from_resolver_fn(move |mut target: genai::ServiceTarget| {
+        if let Some(ref ep) = custom_endpoint {
+            let mut url = ep.clone();
+            if !url.ends_with('/') {
+                url.push('/');
+            }
+            target.endpoint = genai::resolver::Endpoint::from_owned(url);
+        }
+        Ok(target)
+    });
+
     let client = genai::Client::builder()
         .with_model_mapper(model_mapper)
+        .with_service_target_resolver(target_resolver)
         .build();
 
     let model = config
@@ -135,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Message::User(user_prompt),
     ];
 
-    println!("🤖 Invoking {} (using config: {})...", model, config_path.display());
+    println!("🤖 Invoking {}...", model);
 
     loop {
         let response_msgs = step_stream(&client, &model, &history, &tools, None, &|token| {
