@@ -2,6 +2,11 @@ use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 
 pub mod tools;
+pub mod util;
+
+// Re-export GenAI's client types directly so library consumers 
+// can pass them to step without wrappers.
+pub use genai::{Client as GenaiClient, chat::ChatOptions};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Message {
@@ -19,7 +24,7 @@ pub enum Message {
         content: String,
         is_error: bool,
     },
-    Error(String), // Model-level generation failures (e.g. context limit, content block)
+    Error(String), // Model-level generation failures (e.g. content block)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,27 +55,33 @@ impl std::fmt::Display for BondageError {
 
 impl std::error::Error for BondageError {}
 
-#[async_trait::async_trait]
-pub trait LlmEngine {
-    async fn generate(
-        &self,
-        messages: &[Message],
-        allowed_tools: &[ToolDefinition],
-    ) -> Result<Vec<Message>, BondageError>;
-}
-
 /// Boundary and state configuration for tool execution
 pub struct ToolContext {
     pub workspace_root: PathBuf,
     pub current_dir: PathBuf,
 }
 
-/// The core step function. It is a stateless wrapper that delegates 
-/// model invocation to the supplied engine.
+/// The core step function. It converts our stateless message rope 
+/// to GenAI types, executes the chat, and parses the response back.
 pub async fn step(
-    engine: &dyn LlmEngine,
+    client: &GenaiClient,
+    model: &str,
     messages: &[Message],
     allowed_tools: &[ToolDefinition],
+    options: Option<ChatOptions>,
 ) -> Result<Vec<Message>, BondageError> {
-    engine.generate(messages, allowed_tools).await
+    let chat_req = genai::chat::ChatRequest::new(util::to_genai_messages(messages));
+
+    let chat_req = if allowed_tools.is_empty() {
+        chat_req
+    } else {
+        chat_req.with_tools(util::to_genai_tools(allowed_tools))
+    };
+
+    let response = client
+        .exec_chat(model, chat_req, options.as_ref())
+        .await
+        .map_err(|e| BondageError::Engine(e.to_string()))?;
+
+    Ok(util::from_genai_response(response))
 }
