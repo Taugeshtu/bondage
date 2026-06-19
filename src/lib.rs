@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 
+pub mod tools;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Message {
     System(String),
