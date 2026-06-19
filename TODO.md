@@ -22,5 +22,5 @@ runtime:
 
 bonus:
 - [ ] Policies helper functions (managing allowances and security rules)
-- [ ] Minimal CLI Harness (TBD)
+- [x] Minimal CLI Harness
 - [ ] hardening (looking for things that may break, and putting padding there)
