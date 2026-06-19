@@ -1,4 +1,4 @@
-use crate::{Message, ToolDefinition, ToolContext, BondageError};
+use crate::{Message, ToolDefinition, BondageError};
 
 pub mod tool_lookup;
 
@@ -7,11 +7,11 @@ pub async fn execute_tool(
     id: &str,
     name: &str,
     arguments: &str,
-    context: &ToolContext,
+    base_dir: &std::path::Path,
 ) -> Message {
     let result = match name {
         "lookup" => match serde_json::from_str::<tool_lookup::LookupArgs>(arguments) {
-            Ok(args) => tool_lookup::execute(args, context).await,
+            Ok(args) => tool_lookup::execute(args, base_dir).await,
             Err(e) => Err(BondageError::Serialization(e.to_string())),
         },
         other => Err(BondageError::Tool(format!("Unknown tool: {}", other))),
