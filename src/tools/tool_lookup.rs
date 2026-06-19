@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use serde::Deserialize;
-use crate::{Message, ToolDefinition, ToolContext, BondageError};
+use crate::{ToolDefinition, ToolContext, BondageError};
 
 #[derive(Deserialize)]
 pub struct LookupArgs {
@@ -230,5 +230,149 @@ pub fn definition() -> ToolDefinition {
             },
             "required": ["target"]
         }),
+    }
+}
+
+// =========================================================================
+// Tests
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn setup_workspace() -> (PathBuf, ToolContext) {
+        let test_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("bondage_test_{}", test_id));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // 1. Create a small file
+        let small_path = temp_dir.join("small.txt");
+        fs::write(&small_path, "apple\nbanana\ncherry").unwrap();
+
+        // 2. Create a larger file (120 lines)
+        let large_path = temp_dir.join("large.txt");
+        let mut large_content = String::new();
+        for i in 1..=120 {
+            large_content.push_str(&format!("Line {}\n", i));
+        }
+        fs::write(&large_path, large_content).unwrap();
+
+        // 3. Create a subdirectory and a nested file
+        let subdir = temp_dir.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+        let nested_path = subdir.join("nested.txt");
+        fs::write(&nested_path, "nested apple").unwrap();
+
+        let context = ToolContext {
+            workspace_root: temp_dir.clone(),
+            current_dir: temp_dir.clone(),
+        };
+
+        (temp_dir, context)
+    }
+
+    fn teardown_workspace(dir: PathBuf) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn test_file_read_entire() {
+        let (dir, context) = setup_workspace();
+        let args = LookupArgs {
+            target: "small.txt".to_string(),
+            query: None,
+            radius: None,
+        };
+        let res = execute(args, &context).await.unwrap();
+        assert_eq!(res, "apple\nbanana\ncherry");
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_file_read_truncated() {
+        let (dir, context) = setup_workspace();
+        let args = LookupArgs {
+            target: "large.txt".to_string(),
+            query: None,
+            radius: None,
+        };
+        let res = execute(args, &context).await.unwrap();
+        assert!(res.contains("... truncated"));
+        assert!(res.contains("20 lines remaining"));
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_file_lookup_query() {
+        let (dir, context) = setup_workspace();
+        let args = LookupArgs {
+            target: "small.txt".to_string(),
+            query: Some("banana".to_string()),
+            radius: Some(1),
+        };
+        let res = execute(args, &context).await.unwrap();
+        // banana is line 2. With radius 1, it should output lines 1, 2, and 3
+        assert!(res.contains("1: apple"));
+        assert!(res.contains("2: banana"));
+        assert!(res.contains("3: cherry"));
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_dir_list() {
+        let (dir, context) = setup_workspace();
+        let args = LookupArgs {
+            target: "subdir".to_string(),
+            query: None,
+            radius: Some(5),
+        };
+        let res = execute(args, &context).await.unwrap();
+        assert!(res.contains("file: nested.txt"));
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_dir_grep() {
+        let (dir, context) = setup_workspace();
+        let args = LookupArgs {
+            target: ".".to_string(),
+            query: Some("apple".to_string()),
+            radius: None,
+        };
+        let res = execute(args, &context).await.unwrap();
+        // Should find matches in small.txt and nested.txt
+        assert!(res.contains("small.txt:1: apple"));
+        assert!(res.contains("nested.txt:1: nested apple"));
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_web_url_lookup() {
+        let (_, context) = setup_workspace();
+        let args = LookupArgs {
+            target: "https://example.com".to_string(),
+            query: None,
+            radius: None,
+        };
+        // This will perform a real fetch. Let it fail if network isn't accessible.
+        let res = execute(args, &context).await.unwrap();
+        assert!(res.contains("Example Domain"));
+    }
+
+    #[tokio::test]
+    async fn test_web_search_not_implemented() {
+        let (_, context) = setup_workspace();
+        let args = LookupArgs {
+            target: "web".to_string(),
+            query: Some("rust lang".to_string()),
+            radius: None,
+        };
+        let res = execute(args, &context).await.unwrap();
+        assert!(res.contains("not implemented yet"));
     }
 }
