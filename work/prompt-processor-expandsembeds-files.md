@@ -1,0 +1,1 @@
+prompt processor that expands/embeds files when they are referented via `@`

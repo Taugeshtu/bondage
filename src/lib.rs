@@ -90,10 +90,9 @@ pub async fn step_stream(
     options: Option<ChatOptions>,
     on_token: &(dyn Fn(String) + Send + Sync),
 ) -> Result<Vec<Message>, BondageError> {
-    // Force capture_content in the stream options so that genai normalizes and 
-    // delivers the fully assembled message/tool payload in the End event.
     let mut options = options.unwrap_or_default();
     options.capture_content = Some(true);
+    options.capture_tool_calls = Some(true);
 
     let chat_req = genai::chat::ChatRequest::new(util::to_genai_messages(messages));
 

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::io::{self, Write};
 use serde::Deserialize;
-use bondage::Message;
+use bondage::{Message, step_stream};
 
 #[derive(Deserialize, Debug, Default)]
 struct Config {
@@ -140,42 +140,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🤖 Invoking {}...", model);
 
     loop {
-        let response_msgs = bondage::step(&client, &model, &history, &tools, None).await?;
+        let response_msgs = step_stream(&client, &model, &history, &tools, None, &|token| {
+            print!("{}", token);
+            let _ = io::stdout().flush();
+        }).await?;
+
+        println!();
 
         let mut has_tool_calls = false;
         
         for msg in response_msgs {
             history.push(msg.clone());
             
-            match msg {
-                Message::ModelText(text) => {
-                    println!("{}", text);
-                }
-                Message::ModelToolRequest { id, name, arguments } => {
-                    has_tool_calls = true;
+            if let Message::ModelToolRequest { id, name, arguments } = msg {
+                has_tool_calls = true;
+                
+                if ask_approval(&name, &arguments) {
+                    println!("▶️ Executing {}...", name);
+                    let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
                     
-                    if ask_approval(&name, &arguments) {
-                        println!("▶️ Executing {}...", name);
-                        let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
-                        
-                        if let Message::ToolResponse { content, is_error, .. } = &tool_result {
-                            let status = if *is_error { "ERROR" } else { "SUCCESS" };
-                            let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
-                            println!("✅ [{}] Output preview:\n{}\n...", status, preview);
-                        }
-                        
-                        history.push(tool_result);
-                    } else {
-                        println!("❌ Denied.");
-                        history.push(Message::ToolResponse {
-                            id,
-                            name,
-                            content: "Permission Denied by User".to_string(),
-                            is_error: true,
-                        });
+                    if let Message::ToolResponse { content, is_error, .. } = &tool_result {
+                        let status = if *is_error { "ERROR" } else { "SUCCESS" };
+                        let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
+                        println!("✅ [{}] Output preview:\n{}\n...", status, preview);
                     }
+                    
+                    history.push(tool_result);
+                } else {
+                    println!("❌ Denied.");
+                    history.push(Message::ToolResponse {
+                        id,
+                        name,
+                        content: "Permission Denied by User".to_string(),
+                        is_error: true,
+                    });
                 }
-                _ => {}
             }
         }
 
