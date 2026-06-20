@@ -102,3 +102,122 @@ pub fn from_genai_content(content: MessageContent) -> Vec<Message> {
 pub fn from_genai_response(res: genai::chat::ChatResponse) -> Vec<Message> {
     from_genai_content(res.content)
 }
+
+/// Truncate text by keeping the first N lines (and head_chars) and the last M lines (and tail_chars).
+/// Returns the text as-is if it's within both limits or if limits overlap.
+pub fn truncate_text(
+    content: &str,
+    head_lines: usize,
+    tail_lines: usize,
+    head_chars: usize,
+    tail_chars: usize,
+) -> String {
+    let total_chars = content.chars().count();
+    let total_bytes = content.len();
+
+    // Find byte indices of line starts
+    // A line starts at index 0, and right after every '\n'
+    let mut line_starts = vec![0];
+    for (idx, c) in content.char_indices() {
+        if c == '\n' {
+            let next_idx = idx + 1;
+            if next_idx < total_bytes {
+                line_starts.push(next_idx);
+            }
+        }
+    }
+    let total_lines = line_starts.len();
+
+    // If total size is within both limits, return as-is
+    if total_lines <= head_lines + tail_lines && total_chars <= head_chars + tail_chars {
+        return content.to_string();
+    }
+
+    // 1. Determine Head End Byte Index (Strictest of line vs char limits)
+    let head_line_end_byte = if head_lines < total_lines {
+        line_starts[head_lines]
+    } else {
+        total_bytes
+    };
+
+    let head_char_end_byte = if head_chars < total_chars {
+        content.char_indices().nth(head_chars).map(|(idx, _)| idx).unwrap_or(total_bytes)
+    } else {
+        total_bytes
+    };
+
+    let head_end_byte = head_line_end_byte.min(head_char_end_byte);
+
+    // 2. Determine Tail Start Byte Index (Strictest of line vs char limits)
+    let tail_line_start_byte = if tail_lines < total_lines {
+        line_starts[total_lines - tail_lines]
+    } else {
+        0
+    };
+
+    let tail_char_start_byte = if tail_chars < total_chars {
+        let skip_chars = total_chars - tail_chars;
+        content.char_indices().nth(skip_chars).map(|(idx, _)| idx).unwrap_or(0)
+    } else {
+        0
+    };
+
+    let tail_start_byte = tail_line_start_byte.max(tail_char_start_byte);
+
+    // If limits overlap, no gap exists to truncate
+    if head_end_byte >= tail_start_byte {
+        return content.to_string();
+    }
+
+    // Calculate omitted statistics
+    let omitted_part = &content[head_end_byte..tail_start_byte];
+    let omitted_lines = omitted_part.chars().filter(|&c| c == '\n').count();
+    let omitted_bytes = omitted_part.len();
+
+    let head = &content[..head_end_byte];
+    let tail = &content[tail_start_byte..];
+
+    // Reassemble cleanly (avoiding duplicate newlines)
+    let mut result = String::with_capacity(head.len() + tail.len() + 64);
+    result.push_str(head);
+    if !head.is_empty() && !head.ends_with('\n') {
+        result.push('\n');
+    }
+    result.push_str(&format!(
+        "[... {} lines and {} bytes omitted ...]",
+        omitted_lines, omitted_bytes
+    ));
+    if !tail.is_empty() && !tail.starts_with('\n') {
+        result.push('\n');
+    }
+    result.push_str(tail);
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_text_no_truncation() {
+        let content = "line1\nline2\nline3";
+        let truncated = truncate_text(content, 5, 5, 100, 100);
+        assert_eq!(truncated, content);
+    }
+
+    #[test]
+    fn test_truncate_text_with_line_truncation() {
+        let content = "line1\nline2\nline3\nline4\nline5";
+        let truncated = truncate_text(content, 1, 1, 100, 100);
+        assert_eq!(truncated, "line1\n[... 3 lines and 18 bytes omitted ...]\nline5");
+    }
+
+    #[test]
+    fn test_truncate_text_with_char_truncation() {
+        let content = "abcdefghij";
+        // 1 line, 10 chars. Let's truncate to head 2 chars, tail 3 chars.
+        let truncated = truncate_text(content, 5, 5, 2, 3);
+        assert_eq!(truncated, "ab\n[... 0 lines and 5 bytes omitted ...]\nhij");
+    }
+}

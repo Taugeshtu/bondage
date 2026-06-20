@@ -351,7 +351,13 @@ async fn execute_bash_tmux(
                     let trimmed_cmd = command_to_run.trim();
                     let last_cmd_line = trimmed_cmd.lines().last().unwrap_or("");
                     if idle && !last_line.trim().ends_with(last_cmd_line) {
-                        output_content = content;
+                        output_content = bondage::util::truncate_text(
+                            &content,
+                            10,    // N lines head
+                            100,   // M lines tail
+                            1200,  // N * 120 head chars
+                            12000, // M * 120 tail chars
+                        );
                         break;
                     }
                 }
