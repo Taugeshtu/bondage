@@ -188,6 +188,19 @@ async fn execute_bash_tmux(
     // 0. Hardening Fallback: If tmux is not available on the host system, run command directly via tokio one-off process
     if !tmux::is_tmux_available() {
         println!("⚠️  Warning: tmux is not installed. Falling back to raw one-off command execution.");
+        
+        // If the safety policy is Ask, we must prompt the user inline because we can't use the tmux-attach approval mechanism
+        if policy_mode == bondage::policy::PolicyMode::Ask {
+            if !ask_approval("bash", arguments) {
+                return Message::ToolResponse {
+                    id: id.to_string(),
+                    name: "bash".to_string(),
+                    content: "Permission Denied: command execution cancelled by user.".to_string(),
+                    is_error: true,
+                };
+            }
+        }
+
         let baseline_res = bondage::tools::tool_bash::execute(
             bondage::tools::tool_bash::BashArgs { command: command_to_run },
             current_dir,
@@ -225,7 +238,7 @@ async fn execute_bash_tmux(
     }
 
     // 2. Send the command (without enter)
-    if let Err(e) = tmux::send_command(&session_name, &command_to_run) {
+    if let Err(e) = tmux::send_command_literal(&session_name, &command_to_run) {
         return Message::ToolResponse {
             id: id.to_string(),
             name: "bash".to_string(),
@@ -236,7 +249,7 @@ async fn execute_bash_tmux(
 
     // If the policy mode is "Yes" (auto-accept / yolo mode), send "Enter" right after the command
     if policy_mode == bondage::policy::PolicyMode::Yes {
-        if let Err(e) = tmux::send_command(&session_name, "C-m") {
+        if let Err(e) = tmux::send_control_key(&session_name, "C-m") {
             return Message::ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
@@ -248,6 +261,7 @@ async fn execute_bash_tmux(
 
     // 3. Pop the terminal (Only if policy_mode != Yes / we are NOT in auto-accept YOLO mode)
     let mut term_handle = None;
+    let mut fallback_to_inline_approval = false;
     if policy_mode != bondage::policy::PolicyMode::Yes {
         println!("📺 Popping interactive terminal window (Alacritty / Tmux Split)...");
         term_handle = match tmux::pop_terminal(&session_name, custom_terminal.as_deref()) {
@@ -265,12 +279,37 @@ async fn execute_bash_tmux(
                 };
             }
         };
+        if term_handle.is_none() {
+            fallback_to_inline_approval = true;
+        }
     }
 
-    // 4. Polling loop
-    if policy_mode != bondage::policy::PolicyMode::Yes {
+    // 4. Polling / Approval loop
+    if fallback_to_inline_approval {
+        if ask_approval("bash", &arguments) {
+            // User approved, send Enter key to run the command
+            if let Err(e) = tmux::send_control_key(&session_name, "C-m") {
+                return Message::ToolResponse {
+                    id: id.to_string(),
+                    name: "bash".to_string(),
+                    content: format!("Failed to execute command in tmux: {}", e),
+                    is_error: true,
+                };
+            }
+        } else {
+            // User denied, send Ctrl+C to clear the session
+            let _ = tmux::send_control_key(&session_name, "C-c");
+            return Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: "Permission Denied: command execution cancelled by user.".to_string(),
+                is_error: true,
+            };
+        }
+    } else if policy_mode != bondage::policy::PolicyMode::Yes {
         println!("⏳ Waiting for user to press Enter in terminal to run command...");
     }
+
     let poll_interval = std::time::Duration::from_millis(200);
     let output_content;
 
@@ -289,7 +328,7 @@ async fn execute_bash_tmux(
 
         if should_cancel {
             // Send Ctrl+C to clear the pending command line in the session
-            let _ = tmux::send_command(&session_name, "C-c");
+            let _ = tmux::send_control_key(&session_name, "C-c");
             
             // Clean up display window/pane if still running
             if let Some(h) = term_handle {
@@ -309,7 +348,9 @@ async fn execute_bash_tmux(
             let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
             if let Some(&last_line) = lines.last() {
                 if let Ok(idle) = tmux::is_pane_idle(&session_name) {
-                    if idle && !last_line.trim().ends_with(&command_to_run) {
+                    let trimmed_cmd = command_to_run.trim();
+                    let last_cmd_line = trimmed_cmd.lines().last().unwrap_or("");
+                    if idle && !last_line.trim().ends_with(last_cmd_line) {
                         output_content = content;
                         break;
                     }

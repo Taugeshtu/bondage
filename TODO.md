@@ -11,9 +11,9 @@ tools:
 - [x] `write` tool
 	- [x] Full file overwrite (creating missing folders automatically)
 	- [x] Substring match-and-replace patch (safety check for uniqueness)
-- [ ] `bash` tool
-	- [ ] Shell command execution
-	- [ ] Output capture (binding stdout/stderr and exit status codes)
+- [x] `bash` tool
+	- [x] Shell command execution
+	- [x] Output capture (binding stdout/stderr and exit status codes)
 
 runtime:
 - [x] GenAI Integration
@@ -24,9 +24,14 @@ runtime:
 
 bonus:
 - [x] Policies helper functions (managing allowances and security rules)
-- [ ] hardening (looking for things that may break, and putting padding there)
+- [~] hardening (looking for things that may break, and putting padding there)
 	- [x] Fail when requested config missing
 	- [x] Fail/notify when configured terminal command is missing or broken
+	- [x] Harden tmux send-keys against command/keystroke injection and flag misinterpretation
+	- [x] Fix security policy bypass when tmux is missing
+	- [x] Prevent circular directory symlink loops in grep search (stack overflow crash fix)
+	- [x] Fallback to inline approval in headless/non-interactive TTY environments to prevent hangs
+	- [x] Support multi-line command output polling in tmux pipeline
 	- [ ] Retry tool calls (4 attempts, progressive decay)
 	- [ ] Retry LLM calls?
 
@@ -40,3 +45,4 @@ rope:
 - [x] pretty-printing help
 - [ ] pretty-printing whole screen, maybe
 - [ ] interactive mode
+

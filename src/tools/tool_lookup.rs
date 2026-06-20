@@ -143,6 +143,11 @@ fn lookup_dir(path: &Path, query: Option<&str>, radius: usize) -> Result<String,
                     if name.starts_with('.') || name == "node_modules" || name == "target" {
                         continue;
                     }
+                    if let Ok(file_type) = entry.file_type() {
+                        if file_type.is_symlink() {
+                            continue;
+                        }
+                    }
                     walk(&path, q_lower, results, truncated)?;
                 }
             } else if dir.is_file() {
@@ -466,6 +471,28 @@ mod tests {
         };
         let res = execute(args, &dir).await.unwrap();
         assert!(res.contains("not implemented yet"));
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_dir_grep_circular_symlink() {
+        let dir = setup_workspace();
+        
+        #[cfg(unix)]
+        {
+            let link_path = dir.join("loop");
+            let _ = std::os::unix::fs::symlink(&dir, link_path);
+        }
+
+        let args = LookupArgs {
+            target: ".".to_string(),
+            query: Some("apple".to_string()),
+            radius: None,
+        };
+
+        let res = execute(args, &dir).await.unwrap();
+        assert!(res.contains("small.txt"));
+        
         teardown_workspace(dir);
     }
 }

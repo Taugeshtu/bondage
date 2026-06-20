@@ -40,10 +40,18 @@ pub fn start_session(session_name: &str, current_dir: &Path) -> std::io::Result<
     Ok(())
 }
 
-/// Send a command to the tmux session without executing it (no enter key)
-pub fn send_command(session_name: &str, command: &str) -> std::io::Result<()> {
+/// Send a literal command string to the tmux session without executing it (using -l)
+pub fn send_command_literal(session_name: &str, command: &str) -> std::io::Result<()> {
     Command::new("tmux")
-        .args(["send-keys", "-t", session_name, command])
+        .args(["send-keys", "-t", session_name, "-l", command])
+        .status()?;
+    Ok(())
+}
+
+/// Send a special control key (like "C-m" or "C-c") to the tmux session
+pub fn send_control_key(session_name: &str, key: &str) -> std::io::Result<()> {
+    Command::new("tmux")
+        .args(["send-keys", "-t", session_name, key])
         .status()?;
     Ok(())
 }
