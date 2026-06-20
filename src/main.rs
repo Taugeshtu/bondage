@@ -12,6 +12,7 @@ struct Config {
     api_key: Option<String>,
     endpoint: Option<String>,
     adapter: Option<String>,
+    terminal: Option<String>,
     #[serde(default)]
     policy: bondage::policy::PolicyConfig,
 }
@@ -29,6 +30,9 @@ impl Config {
         }
         if other.adapter.is_some() {
             self.adapter = other.adapter;
+        }
+        if other.terminal.is_some() {
+            self.terminal = other.terminal;
         }
         
         // Merge policy fields
@@ -166,6 +170,7 @@ async fn execute_bash_tmux(
     arguments: &str,
     current_dir: &std::path::Path,
     policy_mode: bondage::policy::PolicyMode,
+    custom_terminal: Option<String>,
 ) -> Message {
     let args: Result<bondage::tools::tool_bash::BashArgs, _> = serde_json::from_str(arguments);
     let command_to_run = match args {
@@ -241,22 +246,31 @@ async fn execute_bash_tmux(
         }
     }
 
-    // 3. Pop the terminal
-    println!("📺 Popping interactive terminal window (Alacritty / Tmux Split)...");
-    let mut term_handle = match tmux::pop_terminal(&session_name) {
-        Ok(handle) => handle,
-        Err(e) => {
-            return Message::ToolResponse {
-                id: id.to_string(),
-                name: "bash".to_string(),
-                content: format!("Failed to spawn terminal: {}", e),
-                is_error: true,
-            };
-        }
-    };
+    // 3. Pop the terminal (Only if policy_mode != Yes / we are NOT in auto-accept YOLO mode)
+    let mut term_handle = None;
+    if policy_mode != bondage::policy::PolicyMode::Yes {
+        println!("📺 Popping interactive terminal window (Alacritty / Tmux Split)...");
+        term_handle = match tmux::pop_terminal(&session_name, custom_terminal.as_deref()) {
+            Ok(handle) => handle,
+            Err(e) => {
+                return Message::ToolResponse {
+                    id: id.to_string(),
+                    name: "bash".to_string(),
+                    content: format!(
+                        "Error: Failed to spawn the configured terminal command: {}\n\
+                         Please verify that the terminal emulator is installed and correctly configured in your config.toml.",
+                        e
+                    ),
+                    is_error: true,
+                };
+            }
+        };
+    }
 
     // 4. Polling loop
-    println!("⏳ Waiting for user to press Enter in terminal to run command...");
+    if policy_mode != bondage::policy::PolicyMode::Yes {
+        println!("⏳ Waiting for user to press Enter in terminal to run command...");
+    }
     let poll_interval = std::time::Duration::from_millis(200);
     let output_content;
 
@@ -532,7 +546,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("▶️ Executing {}...", name);
                     
                     let tool_result = if name == "bash" {
-                        execute_bash_tmux(&id, &arguments, &current_dir, policy_mode).await
+                        execute_bash_tmux(&id, &arguments, &current_dir, policy_mode, config.terminal.clone()).await
                     } else {
                         bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await
                     };

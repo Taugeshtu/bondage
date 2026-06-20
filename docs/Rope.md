@@ -23,3 +23,8 @@
 
   > `rope "<prompt>"`
   Wrapping in quotes protects against shell's interpretation of special characters - single quote, redirects
+
+---
+
+For advanced details on bash execution and full config options, see:
+[AdvancedRope.md](AdvancedRope.md)

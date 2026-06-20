@@ -21,3 +21,7 @@ Bondage provides minimal set of high-leverage tools:
 ### Integration Example
 
 // here we'll just send the reader to our minimal CLI app's core
+
+---
+
+For the CLI companion integration details, see [Rope](docs/Rope.md).

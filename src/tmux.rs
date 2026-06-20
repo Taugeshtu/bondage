@@ -91,14 +91,27 @@ pub fn has_attached_clients(session_name: &str) -> bool {
     }
 }
 
-/// Spawns a terminal GUI (Alacritty) or splits the tmux window to attach to the session
-pub fn pop_terminal(session_name: &str) -> std::io::Result<Option<TerminalHandle>> {
+/// Spawns the terminal GUI or splits the tmux window to attach to the session
+pub fn pop_terminal(session_name: &str, custom_terminal: Option<&str>) -> std::io::Result<Option<TerminalHandle>> {
     let is_gui = env::var("WAYLAND_DISPLAY").is_ok() || env::var("DISPLAY").is_ok();
     
     if is_gui {
-        // Spawn Alacritty window and attach (unsetting TMUX to avoid nesting errors)
-        let child = Command::new("alacritty")
-            .args(["-e", "tmux", "attach-session", "-t", session_name])
+        let term_str = custom_terminal.unwrap_or("alacritty -e");
+        let cmd_parts: Vec<&str> = term_str.split_whitespace().collect();
+        if cmd_parts.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Configured terminal command is empty",
+            ));
+        }
+        
+        let mut cmd = Command::new(cmd_parts[0]);
+        if cmd_parts.len() > 1 {
+            cmd.args(&cmd_parts[1..]);
+        }
+        
+        let child = cmd
+            .args(["tmux", "attach-session", "-t", session_name])
             .env_remove("TMUX")
             .spawn()?;
         Ok(Some(TerminalHandle::Gui(child)))

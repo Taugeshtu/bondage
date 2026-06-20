@@ -26,6 +26,7 @@ bonus:
 - [x] Policies helper functions (managing allowances and security rules)
 - [ ] hardening (looking for things that may break, and putting padding there)
 	- [x] Fail when requested config missing
+	- [x] Fail/notify when configured terminal command is missing or broken
 	- [ ] Retry tool calls (4 attempts, progressive decay)
 	- [ ] Retry LLM calls?
 
