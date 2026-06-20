@@ -7,6 +7,12 @@ pub enum TerminalHandle {
     Tty(String), // Tmux Pane ID
 }
 
+/// Check if tmux binary is installed and executable
+pub fn is_tmux_available() -> bool {
+    Command::new("tmux").arg("-V").output().is_ok()
+}
+
+
 /// Check if a tmux session exists
 pub fn has_session(session_name: &str) -> bool {
     let output = Command::new("tmux")

@@ -165,6 +165,7 @@ async fn execute_bash_tmux(
     id: &str,
     arguments: &str,
     current_dir: &std::path::Path,
+    policy_mode: bondage::policy::PolicyMode,
 ) -> Message {
     let args: Result<bondage::tools::tool_bash::BashArgs, _> = serde_json::from_str(arguments);
     let command_to_run = match args {
@@ -178,6 +179,30 @@ async fn execute_bash_tmux(
             };
         }
     };
+
+    // 0. Hardening Fallback: If tmux is not available on the host system, run command directly via tokio one-off process
+    if !tmux::is_tmux_available() {
+        println!("⚠️  Warning: tmux is not installed. Falling back to raw one-off command execution.");
+        let baseline_res = bondage::tools::tool_bash::execute(
+            bondage::tools::tool_bash::BashArgs { command: command_to_run },
+            current_dir,
+        ).await;
+        
+        return match baseline_res {
+            Ok(content) => Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content,
+                is_error: false,
+            },
+            Err(e) => Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: e.to_string(),
+                is_error: true,
+            },
+        };
+    }
 
     let pid = std::process::id();
     let session_name = format!("rope-shell-{}", pid);
@@ -202,6 +227,18 @@ async fn execute_bash_tmux(
             content: format!("Failed to send command to tmux: {}", e),
             is_error: true,
         };
+    }
+
+    // If the policy mode is "Yes" (auto-accept / yolo mode), send "Enter" right after the command
+    if policy_mode == bondage::policy::PolicyMode::Yes {
+        if let Err(e) = tmux::send_command(&session_name, "C-m") {
+            return Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: format!("Failed to automatically execute command in tmux: {}", e),
+                is_error: true,
+            };
+        }
     }
 
     // 3. Pop the terminal
@@ -282,6 +319,42 @@ async fn execute_bash_tmux(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Check if we are in TTY and NOT in TMUX, and if so, bootstrap ourselves in tmux
+    let is_gui = std::env::var("WAYLAND_DISPLAY").is_ok() || std::env::var("DISPLAY").is_ok();
+    let in_tmux = std::env::var("TMUX").is_ok();
+    
+    if !is_gui && !in_tmux {
+        println!("📟 Raw TTY console detected. Launching tmux session to enable split-screen pane...");
+        let current_exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("rope"));
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        
+        let pid = std::process::id();
+        let main_session_name = format!("rope-main-{}", pid);
+        
+        let mut tmux_args = vec![
+            "new-session".to_string(),
+            "-s".to_string(),
+            main_session_name,
+        ];
+        tmux_args.push(current_exe.to_string_lossy().to_string());
+        for arg in args {
+            tmux_args.push(arg);
+        }
+        
+        match std::process::Command::new("tmux").args(&tmux_args).status() {
+            Ok(status) => {
+                std::process::exit(status.code().unwrap_or(0));
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    println!("⚠️  Warning: tmux binary not found. Running in raw terminal without split-screen support.");
+                } else {
+                    println!("⚠️  Warning: Failed to launch tmux: {}. Proceeding in raw terminal.", e);
+                }
+            }
+        }
+    }
+
     // Ensure config dir and baseline settings exist
     ensure_config_installed()?;
 
@@ -459,7 +532,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("▶️ Executing {}...", name);
                     
                     let tool_result = if name == "bash" {
-                        execute_bash_tmux(&id, &arguments, &current_dir).await
+                        execute_bash_tmux(&id, &arguments, &current_dir, policy_mode).await
                     } else {
                         bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await
                     };
