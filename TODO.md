@@ -6,7 +6,7 @@ tools:
 	- [x] Local directory lookup (listing folder items and recursive grep)
 	- [x] Web URL scrap (fetch webpage text via HTTP)
 	- [ ] Web search integration (querying search engine)
-	- [ ] respecting gitignore!
+	- [x] respecting gitignore!
 	- [ ] limiting output size
 - [x] `write` tool
 	- [x] Full file overwrite (creating missing folders automatically)

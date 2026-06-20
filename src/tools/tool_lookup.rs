@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use crate::{ToolDefinition, BondageError};
+use ignore::WalkBuilder;
 
 #[derive(Deserialize)]
 pub struct LookupArgs {
@@ -130,44 +131,48 @@ fn lookup_dir(path: &Path, query: Option<&str>, radius: usize) -> Result<String,
         let q_lower = q.to_lowercase();
         let mut truncated = false;
 
-        fn walk(dir: &Path, q_lower: &str, results: &mut Vec<(String, usize, String)>, truncated: &mut bool) -> std::io::Result<()> {
-            if *truncated {
-                return Ok(());
+        let walker = WalkBuilder::new(path)
+            .standard_filters(true)
+            .require_git(false)
+            .build();
+
+        for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => return Err(BondageError::Io(format!("Search failed: {}", e))),
+            };
+            let entry_path = entry.path();
+            
+            // Replicate original hardcoded exclusions just in case they aren't gitignored
+            let has_ignored_component = entry_path.components().any(|c| {
+                let s = c.as_os_str().to_string_lossy();
+                s == "node_modules" || s == "target"
+            });
+            if has_ignored_component {
+                continue;
             }
-            if dir.is_dir() {
-                for entry in std::fs::read_dir(dir)? {
-                    let entry = entry?;
-                    let path = entry.path();
-                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                    
-                    if name.starts_with('.') || name == "node_modules" || name == "target" {
-                        continue;
-                    }
-                    if let Ok(file_type) = entry.file_type() {
-                        if file_type.is_symlink() {
-                            continue;
-                        }
-                    }
-                    walk(&path, q_lower, results, truncated)?;
-                }
-            } else if dir.is_file() {
-                if let Ok(content) = std::fs::read_to_string(dir) {
+
+            if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                if let Ok(content) = std::fs::read_to_string(entry_path) {
                     for (idx, line) in content.lines().enumerate() {
-                        if line.to_lowercase().contains(q_lower) {
-                            results.push((dir.to_string_lossy().into_owned(), idx + 1, line.trim().to_string()));
+                        if line.to_lowercase().contains(&q_lower) {
+                            results.push((
+                                entry_path.to_string_lossy().into_owned(),
+                                idx + 1,
+                                line.trim().to_string(),
+                            ));
                             if results.len() > 200 {
-                                *truncated = true;
-                                return Ok(());
+                                truncated = true;
+                                break;
                             }
                         }
                     }
                 }
             }
-            Ok(())
+            if truncated {
+                break;
+            }
         }
-
-        walk(path, &q_lower, &mut results, &mut truncated)
-            .map_err(|e| BondageError::Io(format!("Search failed: {}", e)))?;
 
         let mut output = format!("<dir_search path=\"{}\" query=\"{}\">\n", path.to_string_lossy(), html_escape(q));
         for (f_path, line_num, line_content) in results {
@@ -182,24 +187,38 @@ fn lookup_dir(path: &Path, query: Option<&str>, radius: usize) -> Result<String,
         let mut dirs = Vec::new();
         let mut files = Vec::new();
         
-        let entries = std::fs::read_dir(path)
-            .map_err(|e| BondageError::Io(format!("Failed to read directory: {}", e)))?;
+        let walker = WalkBuilder::new(path)
+            .max_depth(Some(1))
+            .standard_filters(true)
+            .require_git(false)
+            .build();
         
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') || name == "node_modules" || name == "target" {
-                    continue;
-                }
-                
-                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                
-                if is_dir {
-                    dirs.push(name);
-                } else {
-                    files.push((name, size));
-                }
+        for entry in walker {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => return Err(BondageError::Io(format!("Failed to read directory: {}", e))),
+            };
+            
+            // Skip the target directory itself (depth 0)
+            if entry.depth() == 0 {
+                continue;
+            }
+            
+            let entry_path = entry.path();
+            let name = entry_path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            
+            // Replicate original hardcoded exclusions
+            if name.starts_with('.') || name == "node_modules" || name == "target" {
+                continue;
+            }
+            
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            
+            if is_dir {
+                dirs.push(name);
+            } else {
+                files.push((name, size));
             }
         }
         
@@ -492,6 +511,51 @@ mod tests {
 
         let res = execute(args, &dir).await.unwrap();
         assert!(res.contains("small.txt"));
+        
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_dir_grep_gitignore() {
+        let dir = setup_workspace();
+        
+        // Add a .gitignore file ignoring "small.txt"
+        fs::write(dir.join(".gitignore"), "small.txt\n").unwrap();
+
+        let args = LookupArgs {
+            target: ".".to_string(),
+            query: Some("apple".to_string()),
+            radius: None,
+        };
+
+        let res = execute(args, &dir).await.unwrap();
+        // Since small.txt is ignored, it should not appear in matches
+        assert!(!res.contains("small.txt"));
+        // nested.txt is not ignored, so it should appear
+        assert!(res.contains("nested.txt"));
+        
+        teardown_workspace(dir);
+    }
+
+    #[tokio::test]
+    async fn test_dir_list_gitignore() {
+        let dir = setup_workspace();
+        
+        // Add a .gitignore file ignoring "small.txt"
+        fs::write(dir.join(".gitignore"), "small.txt\n").unwrap();
+
+        let args = LookupArgs {
+            target: ".".to_string(),
+            query: None,
+            radius: Some(5),
+        };
+
+        let res = execute(args, &dir).await.unwrap();
+        // small.txt is ignored, so it should not be listed
+        assert!(!res.contains("name=\"small.txt\""));
+        // large.txt and subdir are not ignored, so they should be listed
+        assert!(res.contains("name=\"large.txt\""));
+        assert!(res.contains("name=\"subdir\""));
         
         teardown_workspace(dir);
     }
