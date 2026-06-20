@@ -19,6 +19,21 @@ fn resolve_path(base_dir: &Path, path_str: &str) -> PathBuf {
     }
 }
 
+fn html_escape(input: &str) -> String {
+    let mut escaped = String::new();
+    for c in input.chars() {
+        match c {
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '&' => escaped.push_str("&amp;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
+
 // =========================================================================
 // File Lookup Logic
 // =========================================================================
@@ -40,36 +55,55 @@ fn lookup_file(path: &Path, query: Option<&str>, radius: usize) -> Result<String
         }
 
         if matches.is_empty() {
-            return Ok(format!("Query '{}' not found in file.", q));
+            return Ok(format!("<file path=\"{}\" query=\"{}\">\n  <!-- Query not found in file -->\n</file>", path.to_string_lossy(), html_escape(q)));
         }
 
-        let mut output = String::new();
-        let mut last_end = 0;
+        let mut output = format!("<file path=\"{}\" query=\"{}\" total_lines=\"{}\">\n", path.to_string_lossy(), html_escape(q), lines.len());
+        
+        let mut current_fragment_start = None;
+        let mut current_fragment_end = None;
 
         for match_idx in matches {
             let start = match_idx.saturating_sub(radius);
             let end = (match_idx + radius + 1).min(lines.len());
 
-            if start > last_end && last_end > 0 {
-                output.push_str("\n... [\n");
+            if let (Some(cur_start), Some(cur_end)) = (current_fragment_start, current_fragment_end) {
+                if start <= cur_end {
+                    current_fragment_end = Some(end);
+                } else {
+                    output.push_str(&format!("  <fragment start_line=\"{}\" end_line=\"{}\">\n", cur_start + 1, cur_end));
+                    for i in cur_start..cur_end {
+                        output.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+                    }
+                    output.push_str("  </fragment>\n");
+                    current_fragment_start = Some(start);
+                    current_fragment_end = Some(end);
+                }
+            } else {
+                current_fragment_start = Some(start);
+                current_fragment_end = Some(end);
             }
-
-            let print_start = start.max(last_end);
-            for i in print_start..end {
-                output.push_str(&format!("{}: {}\n", i + 1, lines[i]));
-            }
-            last_end = end;
         }
 
+        if let (Some(cur_start), Some(cur_end)) = (current_fragment_start, current_fragment_end) {
+            output.push_str(&format!("  <fragment start_line=\"{}\" end_line=\"{}\">\n", cur_start + 1, cur_end));
+            for i in cur_start..cur_end {
+                output.push_str(&format!("{}: {}\n", i + 1, lines[i]));
+            }
+            output.push_str("  </fragment>\n");
+        }
+
+        output.push_str("</file>");
         Ok(output)
     } else {
-        // No query: Return the head of the file for now (first 100 lines)
         let end = 100.min(lines.len());
         let head = lines[0..end].join("\n");
+        let path_str = path.to_string_lossy();
         if lines.len() > 100 {
-            Ok(format!("{}\n\n... truncated ({} lines remaining) ...", head, lines.len() - 100))
+            let remaining = lines.len() - 100;
+            Ok(format!("<file path=\"{}\" total_lines=\"{}\" truncated=\"true\">\n  <content>\n{}\n  </content>\n  <truncated lines_remaining=\"{}\" />\n</file>", path_str, lines.len(), head, remaining))
         } else {
-            Ok(head)
+            Ok(format!("<file path=\"{}\" total_lines=\"{}\">\n  <content>\n{}\n  </content>\n</file>", path_str, lines.len(), head))
         }
     }
 }
@@ -78,13 +112,28 @@ fn lookup_file(path: &Path, query: Option<&str>, radius: usize) -> Result<String
 // Directory Lookup Logic
 // =========================================================================
 
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
 fn lookup_dir(path: &Path, query: Option<&str>, radius: usize) -> Result<String, BondageError> {
     if let Some(q) = query {
-        // Recursive text search (grep)
-        let mut results = String::new();
+        let mut results = Vec::new();
         let q_lower = q.to_lowercase();
+        let mut truncated = false;
 
-        fn walk(dir: &Path, q_lower: &str, results: &mut String) -> std::io::Result<()> {
+        fn walk(dir: &Path, q_lower: &str, results: &mut Vec<(String, usize, String)>, truncated: &mut bool) -> std::io::Result<()> {
+            if *truncated {
+                return Ok(());
+            }
             if dir.is_dir() {
                 for entry in std::fs::read_dir(dir)? {
                     let entry = entry?;
@@ -94,15 +143,15 @@ fn lookup_dir(path: &Path, query: Option<&str>, radius: usize) -> Result<String,
                     if name.starts_with('.') || name == "node_modules" || name == "target" {
                         continue;
                     }
-                    walk(&path, q_lower, results)?;
+                    walk(&path, q_lower, results, truncated)?;
                 }
             } else if dir.is_file() {
                 if let Ok(content) = std::fs::read_to_string(dir) {
                     for (idx, line) in content.lines().enumerate() {
                         if line.to_lowercase().contains(q_lower) {
-                            results.push_str(&format!("{}:{}: {}\n", dir.display(), idx + 1, line.trim()));
-                            if results.len() > 10000 {
-                                results.push_str("... truncated (too many results) ...\n");
+                            results.push((dir.to_string_lossy().into_owned(), idx + 1, line.trim().to_string()));
+                            if results.len() > 200 {
+                                *truncated = true;
                                 return Ok(());
                             }
                         }
@@ -112,37 +161,73 @@ fn lookup_dir(path: &Path, query: Option<&str>, radius: usize) -> Result<String,
             Ok(())
         }
 
-        walk(path, &q_lower, &mut results)
+        walk(path, &q_lower, &mut results, &mut truncated)
             .map_err(|e| BondageError::Io(format!("Search failed: {}", e)))?;
 
-        if results.is_empty() {
-            Ok("No matches found.".to_string())
-        } else {
-            Ok(results)
+        let mut output = format!("<dir_search path=\"{}\" query=\"{}\">\n", path.to_string_lossy(), html_escape(q));
+        for (f_path, line_num, line_content) in results {
+            output.push_str(&format!("  <match file=\"{}\" line=\"{}\">{}</match>\n", f_path, line_num, html_escape(&line_content)));
         }
+        if truncated {
+            output.push_str("  <truncated />\n");
+        }
+        output.push_str("</dir_search>");
+        Ok(output)
     } else {
-        // Directory listing
-        let mut output = String::new();
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
+        
         let entries = std::fs::read_dir(path)
             .map_err(|e| BondageError::Io(format!("Failed to read directory: {}", e)))?;
         
-        let mut count = 0;
         for entry in entries {
             if let Ok(entry) = entry {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let file_type = entry.file_type()
-                    .map(|t| if t.is_dir() { "dir" } else { "file" })
-                    .unwrap_or("unknown");
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                output.push_str(&format!("{}: {} ({} bytes)\n", file_type, name, size));
+                if name.starts_with('.') || name == "node_modules" || name == "target" {
+                    continue;
+                }
                 
-                count += 1;
-                if count >= radius {
-                    output.push_str("\n... truncated list ...");
-                    break;
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                
+                if is_dir {
+                    dirs.push(name);
+                } else {
+                    files.push((name, size));
                 }
             }
         }
+        
+        dirs.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+        files.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        
+        let mut output = format!("<dir path=\"{}\">\n", path.to_string_lossy());
+        let mut count = 0;
+        let mut truncated = false;
+        
+        for d in dirs {
+            if count >= radius {
+                truncated = true;
+                break;
+            }
+            output.push_str(&format!("  <dir name=\"{}\" />\n", d));
+            count += 1;
+        }
+        
+        for (f, size) in files {
+            if count >= radius {
+                truncated = true;
+                break;
+            }
+            output.push_str(&format!("  <file name=\"{}\" size=\"{}\" />\n", f, format_size(size)));
+            count += 1;
+        }
+        
+        if truncated {
+            output.push_str("  <truncated />\n");
+        }
+        
+        output.push_str("</dir>");
         Ok(output)
     }
 }
@@ -170,18 +255,31 @@ async fn lookup_url(url: &str, query: Option<&str>) -> Result<String, BondageErr
         let mut matches = Vec::new();
         for (idx, line) in text.lines().enumerate() {
             if line.to_lowercase().contains(&q_lower) {
-                matches.push(format!("{}: {}", idx + 1, line.trim()));
+                matches.push((idx + 1, line.trim().to_string()));
             }
         }
+        
+        let mut output = format!("<webpage url=\"{}\" query=\"{}\">\n", url, html_escape(q));
         if matches.is_empty() {
-            Ok(format!("Query '{}' not found on page.", q))
+            output.push_str("  <!-- Query not found on page -->\n");
         } else {
-            Ok(matches.join("\n"))
+            for (line_num, line_content) in matches {
+                output.push_str(&format!("  <match line=\"{}\">{}</match>\n", line_num, html_escape(&line_content)));
+            }
         }
+        output.push_str("</webpage>");
+        Ok(output)
     } else {
-        // Return top of page text
+        let total_lines = text.lines().count();
         let head: Vec<&str> = text.lines().take(100).collect();
-        Ok(head.join("\n"))
+        let head_text = head.join("\n");
+        
+        let mut output = format!("<webpage url=\"{}\">\n  <content>\n{}\n  </content>\n", url, html_escape(&head_text));
+        if total_lines > 100 {
+            output.push_str(&format!("  <truncated lines_remaining=\"{}\" />\n", total_lines - 100));
+        }
+        output.push_str("</webpage>");
+        Ok(output)
     }
 }
 
@@ -284,7 +382,8 @@ mod tests {
             radius: None,
         };
         let res = execute(args, &dir).await.unwrap();
-        assert_eq!(res, "apple\nbanana\ncherry");
+        assert!(res.contains("<file path="));
+        assert!(res.contains("apple\nbanana\ncherry"));
         teardown_workspace(dir);
     }
 
@@ -297,8 +396,8 @@ mod tests {
             radius: None,
         };
         let res = execute(args, &dir).await.unwrap();
-        assert!(res.contains("... truncated"));
-        assert!(res.contains("20 lines remaining"));
+        assert!(res.contains("truncated=\"true\""));
+        assert!(res.contains("lines_remaining=\"20\""));
         teardown_workspace(dir);
     }
 
@@ -311,9 +410,8 @@ mod tests {
             radius: Some(1),
         };
         let res = execute(args, &dir).await.unwrap();
-        assert!(res.contains("1: apple"));
+        assert!(res.contains("<fragment start_line=\"1\" end_line=\"3\">"));
         assert!(res.contains("2: banana"));
-        assert!(res.contains("3: cherry"));
         teardown_workspace(dir);
     }
 
@@ -326,7 +424,7 @@ mod tests {
             radius: Some(5),
         };
         let res = execute(args, &dir).await.unwrap();
-        assert!(res.contains("file: nested.txt"));
+        assert!(res.contains("<file name=\"nested.txt\""));
         teardown_workspace(dir);
     }
 
@@ -339,8 +437,9 @@ mod tests {
             radius: None,
         };
         let res = execute(args, &dir).await.unwrap();
-        assert!(res.contains("small.txt:1: apple"));
-        assert!(res.contains("nested.txt:1: nested apple"));
+        assert!(res.contains("<match file="));
+        assert!(res.contains("small.txt\" line=\"1\">apple</match>"));
+        assert!(res.contains("nested.txt\" line=\"1\">nested apple</match>"));
         teardown_workspace(dir);
     }
 
@@ -353,6 +452,7 @@ mod tests {
             radius: None,
         };
         let res = execute(args, &dir).await.unwrap();
+        assert!(res.contains("<webpage url=\"https://example.com\">"));
         assert!(res.contains("Example Domain"));
         teardown_workspace(dir);
     }
