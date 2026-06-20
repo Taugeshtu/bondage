@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 use std::io::{self, Write};
 use serde::Deserialize;
-use bondage::{Message, step_stream};
+use bondage::Message;
 
 #[derive(Deserialize, Debug, Default)]
 struct Config {
     model: Option<String>,
     api_key: Option<String>,
     endpoint: Option<String>,
-    provider: Option<String>,
+    adapter: Option<String>,
 }
 
 fn ask_approval(tool_name: &str, args: &str) -> bool {
@@ -40,6 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Parse arguments: -c/--config, -p/--prompt, and positional fallback
     let mut config_path_str = None;
     let mut prompt = None;
+    let mut positional_args = Vec::new();
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -51,17 +52,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 prompt = args.next();
             }
             other => {
-                if prompt.is_none() {
-                    prompt = Some(other.to_string());
-                }
+                positional_args.push(other.to_string());
             }
         }
     }
 
     let user_prompt = match prompt {
         Some(p) => p,
+        None if !positional_args.is_empty() => positional_args.join(" "),
         None => {
-            eprintln!("Usage: rope [-c <config_path>] [-p <prompt>] or rope <prompt>");
+            eprintln!("Usage: rope [-c <config_path>] [-p <prompt>] or rope <prompt...>");
             std::process::exit(1);
         }
     };
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Inject keys dynamically into environment before initializing Client
     if let Some(key) = &config.api_key {
-        let env_var = match config.provider.as_deref().unwrap_or("openai") {
+        let env_var = match config.adapter.as_deref().unwrap_or("openai") {
             "gemini" => "GEMINI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
             _ => "OPENAI_API_KEY",
@@ -90,12 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 4. Initialize GenAI Client with a custom model mapper and service target resolver
-    let provider = config.provider.clone().unwrap_or_else(|| "openai".to_string());
+    let adapter = config.adapter.clone().unwrap_or_else(|| "openai".to_string());
     
     let model_mapper = genai::resolver::ModelMapper::from_mapper_fn(move |model_iden: genai::ModelIden| {
-        let target_provider = provider.to_lowercase();
+        let target_adapter = adapter.to_lowercase();
         if model_iden.adapter_kind == genai::adapter::AdapterKind::Ollama {
-            let mapped_kind = match target_provider.as_str() {
+            let mapped_kind = match target_adapter.as_str() {
                 "openai" => genai::adapter::AdapterKind::OpenAI,
                 "gemini" => genai::adapter::AdapterKind::Gemini,
                 "anthropic" => genai::adapter::AdapterKind::Anthropic,
@@ -141,41 +141,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🤖 Invoking {}...", model);
 
     loop {
-        let response_msgs = step_stream(&client, &model, &history, &tools, None, &|token| {
-            print!("{}", token);
-            let _ = io::stdout().flush();
-        }).await?;
-
-        println!();
+        let response_msgs = bondage::step(&client, &model, &history, &tools, None).await?;
 
         let mut has_tool_calls = false;
         
         for msg in response_msgs {
             history.push(msg.clone());
             
-            if let Message::ModelToolRequest { id, name, arguments } = msg {
-                has_tool_calls = true;
-                
-                if ask_approval(&name, &arguments) {
-                    println!("▶️ Executing {}...", name);
-                    let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
-                    
-                    if let Message::ToolResponse { content, is_error, .. } = &tool_result {
-                        let status = if *is_error { "ERROR" } else { "SUCCESS" };
-                        let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
-                        println!("✅ [{}] Output preview:\n{}\n...", status, preview);
-                    }
-                    
-                    history.push(tool_result);
-                } else {
-                    println!("❌ Denied.");
-                    history.push(Message::ToolResponse {
-                        id,
-                        name,
-                        content: "Permission Denied by User".to_string(),
-                        is_error: true,
-                    });
+            match msg {
+                Message::ModelText(text) => {
+                    println!("{}", text);
                 }
+                Message::ModelToolRequest { id, name, arguments } => {
+                    has_tool_calls = true;
+                    
+                    if ask_approval(&name, &arguments) {
+                        println!("▶️ Executing {}...", name);
+                        let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
+                        
+                        if let Message::ToolResponse { content, is_error, .. } = &tool_result {
+                            let status = if *is_error { "ERROR" } else { "SUCCESS" };
+                            let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
+                            println!("✅ [{}] Output preview:\n{}\n...", status, preview);
+                        }
+                        
+                        history.push(tool_result);
+                    } else {
+                        println!("❌ Denied.");
+                        history.push(Message::ToolResponse {
+                            id,
+                            name,
+                            content: "Permission Denied by User".to_string(),
+                            is_error: true,
+                        });
+                    }
+                }
+                _ => {}
             }
         }
 

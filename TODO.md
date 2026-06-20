@@ -1,7 +1,7 @@
 # Bondage Project Status
 
 tools:
-- [ ] `lookup` tool
+- [~] `lookup` tool
 	- [x] Local file lookup (anchor keyword search + radius context)
 	- [x] Local directory lookup (listing folder items and recursive grep)
 	- [x] Web URL scrap (fetch webpage text via HTTP)
@@ -14,7 +14,7 @@ tools:
 	- [ ] Output capture (binding stdout/stderr and exit status codes)
 
 runtime:
-- [ ] GenAI Integration
+- [x] GenAI Integration
 	- [x] Use direct GenAI client structs without wrappers
 	- [x] Implement conversion utilities in `util.rs`
 	- [x] Implement standard `step` logic
