@@ -101,9 +101,9 @@ fn lookup_file(path: &Path, query: Option<&str>, radius: usize) -> Result<String
         let path_str = path.to_string_lossy();
         if lines.len() > 100 {
             let remaining = lines.len() - 100;
-            Ok(format!("<file path=\"{}\" total_lines=\"{}\" truncated=\"true\">\n  <content>\n{}\n  </content>\n  <truncated lines_remaining=\"{}\" />\n</file>", path_str, lines.len(), head, remaining))
+            Ok(format!("<file path=\"{}\" total_lines=\"{}\" truncated=\"true\">\n  <content>{}</content>\n  <truncated lines_remaining=\"{}\" />\n</file>", path_str, lines.len(), head, remaining))
         } else {
-            Ok(format!("<file path=\"{}\" total_lines=\"{}\">\n  <content>\n{}\n  </content>\n</file>", path_str, lines.len(), head))
+            Ok(format!("<file path=\"{}\" total_lines=\"{}\">\n  <content>{}</content>\n</file>", path_str, lines.len(), head))
         }
     }
 }
@@ -274,7 +274,7 @@ async fn lookup_url(url: &str, query: Option<&str>) -> Result<String, BondageErr
         let head: Vec<&str> = text.lines().take(100).collect();
         let head_text = head.join("\n");
         
-        let mut output = format!("<webpage url=\"{}\">\n  <content>\n{}\n  </content>\n", url, html_escape(&head_text));
+        let mut output = format!("<webpage url=\"{}\">\n  <content>{}</content>\n", url, html_escape(&head_text));
         if total_lines > 100 {
             output.push_str(&format!("  <truncated lines_remaining=\"{}\" />\n", total_lines - 100));
         }

@@ -1,0 +1,1 @@
+reasonable default polity pls - where we can read anything within our working directory (maybe add extra directories in config?), writes require approvals, and bash is... a nightmare scenario

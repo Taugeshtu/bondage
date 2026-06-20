@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Setup tools and history
     let tools = bondage::tools::get_standard_tools();
     let mut history = vec![
-        Message::System("You are Bondage, a stateless actor core. You have access to a 'lookup' tool. Always look up files or directories if you need more information to answer the user's request. Keep your answers concise.".to_string()),
+        Message::System("You are Bondage, a stateless actor core. You have access to the 'lookup' and 'write' tools. Use 'lookup' to inspect files or directories, and 'write' to create, edit, or patch files. Keep your answers concise.".to_string()),
         Message::User(processed_prompt),
     ];
 

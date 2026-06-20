@@ -1,6 +1,7 @@
 use crate::{Message, ToolDefinition, BondageError};
 
 pub mod tool_lookup;
+pub mod tool_write;
 
 /// Unified router to execute a tool by name with raw JSON arguments
 pub async fn execute_tool(
@@ -12,6 +13,10 @@ pub async fn execute_tool(
     let result = match name {
         "lookup" => match serde_json::from_str::<tool_lookup::LookupArgs>(arguments) {
             Ok(args) => tool_lookup::execute(args, base_dir).await,
+            Err(e) => Err(BondageError::Serialization(e.to_string())),
+        },
+        "write" => match serde_json::from_str::<tool_write::WriteArgs>(arguments) {
+            Ok(args) => tool_write::execute(args, base_dir).await,
             Err(e) => Err(BondageError::Serialization(e.to_string())),
         },
         other => Err(BondageError::Tool(format!("Unknown tool: {}", other))),
@@ -37,5 +42,6 @@ pub async fn execute_tool(
 pub fn get_standard_tools() -> Vec<ToolDefinition> {
     vec![
         tool_lookup::definition(),
+        tool_write::definition(),
     ]
 }

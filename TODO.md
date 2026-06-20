@@ -6,9 +6,9 @@ tools:
 	- [x] Local directory lookup (listing folder items and recursive grep)
 	- [x] Web URL scrap (fetch webpage text via HTTP)
 	- [ ] Web search integration (querying search engine)
-- [ ] `write` tool
-	- [ ] Full file overwrite (creating missing folders automatically)
-	- [ ] Substring match-and-replace patch (safety check for uniqueness)
+- [x] `write` tool
+	- [x] Full file overwrite (creating missing folders automatically)
+	- [x] Substring match-and-replace patch (safety check for uniqueness)
 - [ ] `bash` tool
 	- [ ] Shell command execution
 	- [ ] Output capture (binding stdout/stderr and exit status codes)
