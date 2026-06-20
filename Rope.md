@@ -29,13 +29,17 @@ Any files referenced with `@` in the prompt are automatically read and embedded:
 * Matches spaces greedily against existing files on disk (e.g. `@My Spaced File.txt` matches without quotes).
 * Supports **Level-1 Recursive Nesting** (files referenced inside an embedded file are pulled in, capped at depth 1 to prevent runaway token consumption).
 
-### 4. YOLO Mode (`-y` / `--yolo`)
-Disables interactive confirmation prompts. Runs tool executions automatically—ideal for headless scripting, automated test suites, or fast iterations:
+### 4. YOLO Mode via Policy Config (`-c yolo`)
+Disables interactive confirmation prompts by overriding safety policies to `"yes"` (auto-allow). Runs tool executions automatically—ideal for headless scripting, automated test suites, or fast iterations:
 ```bash
-rope -c gemini -y "Update the version in Cargo.toml to 0.1.1"
+rope -c gemini -c yolo "Update the version in Cargo.toml to 0.1.1"
 ```
+On first launch, Rope automatically generates a default `yolo.toml` file under `~/.config/rope/` pre-configured to allow all local and network tools.
 
-### 5. XML-Structured Provenance
+### 5. Configurable Safety Policies
+Rope maps tools to three access modes: `yes` (auto-allow), `no` (auto-deny), and `ask` (interactive prompt). Configs can be chained (e.g., `-c gemini -c no_network`) to dynamically override policies like `access_lookup_web` or `access_write_fs` for sandboxed runs.
+
+### 6. XML-Structured Provenance
 All tool outputs (directory trees, file reads, grep searches, web requests) are returned to the model wrapped in explicit XML tags (e.g. `<dir>`, `<file>`, `<fragment>`).
 * This provides structured provenance for model context.
 * It remains robust under aggressive model quantization (unlike space-indentation trees, XML tags cannot be flattened or lost in translation).
@@ -52,9 +56,3 @@ For tasks that require more than one turn, Rope will support dropping into a per
 
 ### 2. Surface Utility
 A `surface` overview builder to extract the structural overview (signatures, headers, APIs) of large text/code files, avoiding token blowouts.
-
-### 3. Polity Policies
-Configurable safety boundaries:
-* Read-only freedom inside working directory (customizable via configs).
-* Writes require explicit interactive approvals (unless bypassed with `-y`).
-* Bash executions heavily constrained and padded.

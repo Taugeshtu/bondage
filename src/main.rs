@@ -122,11 +122,49 @@ fn resolve_config_path(config_path_str: Option<&str>) -> std::io::Result<PathBuf
     ))
 }
 
+fn ensure_config_installed() -> std::io::Result<()> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let config_dir = PathBuf::from(&home).join(".config/rope");
+
+    if !config_dir.exists() {
+        std::fs::create_dir_all(&config_dir)?;
+    }
+
+    let yolo_path = config_dir.join("yolo.toml");
+    if !yolo_path.exists() {
+        let yolo_template = r#"[policy]
+access_lookup_directory = "yes"
+access_lookup_fs = "yes"
+access_lookup_web = "yes"
+access_write_directory = "yes"
+access_write_fs = "yes"
+access_bash = "yes"
+"#;
+        std::fs::write(&yolo_path, yolo_template)?;
+        println!("✨ Created default yolo configuration at {}", yolo_path.display());
+    }
+
+    let config_path = config_dir.join("config.toml");
+    if !config_path.exists() {
+        let config_template = r#"# Default configuration template
+# model = "gemini-3.1-flash-lite"
+# adapter = "gemini"
+# api_key = "YOUR_GEMINI_API_KEY_HERE"
+"#;
+        std::fs::write(&config_path, config_template)?;
+        println!("✨ Created default config template at {}", config_path.display());
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Parse arguments: -c/--config, -y/--yolo, and collect positional prompt
+    // Ensure config dir and baseline settings exist
+    ensure_config_installed()?;
+
+    // 1. Parse arguments: -c/--config and collect positional prompt
     let mut config_paths = Vec::new();
-    let mut yolo = false;
     let mut positional_args = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -137,9 +175,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config_paths.push(path);
                 }
             }
-            "-y" | "--yolo" => {
-                yolo = true;
-            }
             other => {
                 positional_args.push(other.to_string());
             }
@@ -147,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if positional_args.is_empty() {
-        eprintln!("Usage: rope [-c <config_path>...] [-y|--yolo] <prompt...>");
+        eprintln!("Usage: rope [-c <config_path>...] <prompt...>");
         std::process::exit(1);
     }
     let user_prompt = positional_args.join(" ");
@@ -269,10 +304,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     bondage::policy::PolicyMode::Yes => Some(true),
                     bondage::policy::PolicyMode::No => Some(false),
                     bondage::policy::PolicyMode::Ask => {
-                        if yolo {
-                            println!("\n⚡ [YOLO Mode] Auto-approving execution of: {} ({})", name, arguments.trim());
-                            Some(true)
-                        } else if ask_approval(&name, &arguments) {
+                        if ask_approval(&name, &arguments) {
                             Some(true)
                         } else {
                             None // Denied by user
@@ -281,6 +313,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 if approved == Some(true) {
+                    if policy_mode == bondage::policy::PolicyMode::Yes {
+                        println!("\n⚡ [Auto-approved by Policy] {} ({})", name, arguments.trim());
+                    }
                     println!("▶️ Executing {}...", name);
                     let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
                     
