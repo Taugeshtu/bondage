@@ -35,6 +35,51 @@ fn load_config(config_path: &std::path::Path) -> Config {
     Config::default()
 }
 
+fn resolve_config_path(config_path_str: Option<&str>) -> std::io::Result<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let config_dir = PathBuf::from(&home).join(".config/rope");
+
+    let Some(raw_path) = config_path_str else {
+        // Default config path fallback
+        return Ok(config_dir.join("config.toml"));
+    };
+
+    // Build filename candidates
+    let mut candidates = Vec::new();
+    if raw_path.to_lowercase().ends_with(".toml") {
+        candidates.push(raw_path.to_string());
+    } else {
+        candidates.push(format!("{}.toml", raw_path));
+        candidates.push(raw_path.to_string());
+    }
+
+    let current_dir = std::env::current_dir()?;
+
+    // Search candidates in order
+    for candidate in &candidates {
+        // 1. Direct path / relative to CWD
+        let direct = PathBuf::from(candidate);
+        if direct.exists() {
+            return Ok(direct);
+        }
+
+        // 2. CWD joined
+        let cwd_joined = current_dir.join(candidate);
+        if cwd_joined.exists() {
+            return Ok(cwd_joined);
+        }
+
+        // 3. ~/.config/rope/ joined
+        let config_joined = config_dir.join(candidate);
+        if config_joined.exists() {
+            return Ok(config_joined);
+        }
+    }
+
+    // Default to the first candidate as a direct path if nothing exists
+    Ok(PathBuf::from(&candidates[0]))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Parse arguments: -c/--config, -p/--prompt, and positional fallback
@@ -67,13 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 2. Resolve Config File
-    let config_path = match config_path_str {
-        Some(p) => PathBuf::from(p),
-        None => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home).join(".config/rope/config.toml")
-        }
-    };
+    let config_path = resolve_config_path(config_path_str.as_deref())?;
 
     let config = load_config(&config_path);
 

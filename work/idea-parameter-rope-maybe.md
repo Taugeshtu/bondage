@@ -1,1 +1,0 @@
-idea: -c parameter of rope maybe takes in plain filenames too, and searches in the CWD (first), then by name in .config/rope/ ?
