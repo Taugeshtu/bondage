@@ -82,9 +82,8 @@ fn resolve_config_path(config_path_str: Option<&str>) -> std::io::Result<PathBuf
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Parse arguments: -c/--config, -p/--prompt, and positional fallback
+    // 1. Parse arguments: -c/--config, and collect positional prompt
     let mut config_path_str = None;
-    let mut prompt = None;
     let mut positional_args = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -93,23 +92,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "-c" | "--config" => {
                 config_path_str = args.next();
             }
-            "-p" | "--prompt" => {
-                prompt = args.next();
-            }
             other => {
                 positional_args.push(other.to_string());
             }
         }
     }
 
-    let user_prompt = match prompt {
-        Some(p) => p,
-        None if !positional_args.is_empty() => positional_args.join(" "),
-        None => {
-            eprintln!("Usage: rope [-c <config_path>] [-p <prompt>] or rope <prompt...>");
-            std::process::exit(1);
-        }
-    };
+    if positional_args.is_empty() {
+        eprintln!("Usage: rope [-c <config_path>] <prompt...>");
+        std::process::exit(1);
+    }
+    let user_prompt = positional_args.join(" ");
 
     // 2. Resolve Config File
     let config_path = resolve_config_path(config_path_str.as_deref())?;
