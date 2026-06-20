@@ -162,11 +162,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let current_dir = std::env::current_dir()?;
 
+    let processed_prompt = bondage::prompt_file_injector::process_prompt(&user_prompt)?;
+
     // 5. Setup tools and history
     let tools = bondage::tools::get_standard_tools();
     let mut history = vec![
         Message::System("You are Bondage, a stateless actor core. You have access to a 'lookup' tool. Always look up files or directories if you need more information to answer the user's request. Keep your answers concise.".to_string()),
-        Message::User(user_prompt),
+        Message::User(processed_prompt),
     ];
 
     println!("🤖 Invoking {}...", model);
