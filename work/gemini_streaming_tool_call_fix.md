@@ -62,4 +62,6 @@ Additional data, function call `default_api:lookup` , position 2.
 ### Proposed Solutions
 1. **Upstream Fix**: Upgrade `genai` to a newer version that supports and preserves `thought_signature`, or patch `genai` to extract and preserve `thoughtSignature` from model outputs and include it in outbound function calls.
 2. **Payload Interception**: Write a custom wrapper or override the Gemini adapter logic in `util.rs` to intercept model-tool requests and preserve their raw fields, bypassing `genai`'s serialization for multi-turn histories.
+3. **OpenAI Protocol Adaptation (Recommended)**: Use Google Gemini's native OpenAI-compatibility layer (`https://generativelanguage.googleapis.com/v1beta/openai/`) by configuring the CLI `adapter` format to `openai`. Because this protocol routes via the standard OpenAI format inside `genai`, it completely bypasses Gemini-specific features like `thought_signature` and `PrettyJsonArray` chunk fragmentation, permitting fully streamed multi-turn tool calling without errors.
+
 

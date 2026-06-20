@@ -90,16 +90,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 4. Initialize GenAI Client with a custom model mapper and service target resolver
-    let adapter = config.adapter.clone().unwrap_or_else(|| "openai".to_string());
+    let config_adapter = config.adapter.clone();
     
     let model_mapper = genai::resolver::ModelMapper::from_mapper_fn(move |model_iden: genai::ModelIden| {
-        let target_adapter = adapter.to_lowercase();
-        if model_iden.adapter_kind == genai::adapter::AdapterKind::Ollama {
-            let mapped_kind = match target_adapter.as_str() {
+        if let Some(ref target_adapter) = config_adapter {
+            let mapped_kind = match target_adapter.to_lowercase().as_str() {
                 "openai" => genai::adapter::AdapterKind::OpenAI,
                 "gemini" => genai::adapter::AdapterKind::Gemini,
                 "anthropic" => genai::adapter::AdapterKind::Anthropic,
-                _ => genai::adapter::AdapterKind::Ollama,
+                _ => model_iden.adapter_kind,
             };
             Ok(genai::ModelIden::new(mapped_kind, model_iden.model_name))
         } else {

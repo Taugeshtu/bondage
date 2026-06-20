@@ -31,6 +31,7 @@ pub fn to_genai_messages(messages: &[Message]) -> Vec<ChatMessage> {
                     call_id: id.clone(),
                     fn_name: name.clone(),
                     fn_arguments: args_val,
+                    thought_signatures: None,
                 });
             }
             Message::ToolResponse { id, name: _, content, is_error: _ } => {
@@ -67,34 +68,31 @@ pub fn to_genai_tools(tools: &[ToolDefinition]) -> Vec<Tool> {
 /// Convert genai's MessageContent enum variant back into our stateless Message rope
 pub fn from_genai_content(content: MessageContent) -> Vec<Message> {
     let mut messages = Vec::new();
+    let mut text_acc = String::new();
+    let mut tool_calls = Vec::new();
 
-    match content {
-        MessageContent::Text(text) => {
-            messages.push(Message::ModelText(text));
-        }
-        MessageContent::Parts(parts) => {
-            let mut text_acc = String::new();
-            for part in parts {
-                if let ContentPart::Text(text) = part {
-                    text_acc.push_str(&text);
-                }
+    for part in content.into_parts() {
+        match part {
+            ContentPart::Text(text) => {
+                text_acc.push_str(&text);
             }
-            if !text_acc.is_empty() {
-                messages.push(Message::ModelText(text_acc));
+            ContentPart::ToolCall(call) => {
+                tool_calls.push(call);
             }
+            _ => {}
         }
-        MessageContent::ToolCalls(tool_calls) => {
-            for call in tool_calls {
-                messages.push(Message::ModelToolRequest {
-                    id: call.call_id,
-                    name: call.fn_name,
-                    arguments: call.fn_arguments.to_string(),
-                });
-            }
-        }
-        MessageContent::ToolResponses(_) => {
-            // LLM responses never contain raw ToolResponses (only ToolCalls)
-        }
+    }
+
+    if !text_acc.is_empty() {
+        messages.push(Message::ModelText(text_acc));
+    }
+
+    for call in tool_calls {
+        messages.push(Message::ModelToolRequest {
+            id: call.call_id,
+            name: call.fn_name,
+            arguments: call.fn_arguments.to_string(),
+        });
     }
 
     messages
@@ -102,9 +100,5 @@ pub fn from_genai_content(content: MessageContent) -> Vec<Message> {
 
 /// Convert genai's response object back into our stateless Message rope
 pub fn from_genai_response(res: genai::chat::ChatResponse) -> Vec<Message> {
-    if let Some(content) = res.content {
-        from_genai_content(content)
-    } else {
-        Vec::new()
-    }
+    from_genai_content(res.content)
 }
