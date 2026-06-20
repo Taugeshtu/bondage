@@ -163,3 +163,22 @@ pub fn close_terminal(handle: TerminalHandle) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+
+
+/// Retrieve the current scrollback history size and cursor Y row in the pane
+pub fn get_pane_cursor_state(session_name: &str) -> std::io::Result<(usize, usize)> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "-F", "#{history_size} #{cursor_y}", "-t", session_name])
+        .output()?;
+    
+    let text = String::from_utf8_lossy(&output.stdout);
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    if parts.len() == 2 {
+        let history = parts[0].parse().unwrap_or(0);
+        let cursor_y = parts[1].parse().unwrap_or(0);
+        Ok((history, cursor_y))
+    } else {
+        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to parse cursor state"))
+    }
+}
