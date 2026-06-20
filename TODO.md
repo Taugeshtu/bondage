@@ -6,6 +6,8 @@ tools:
 	- [x] Local directory lookup (listing folder items and recursive grep)
 	- [x] Web URL scrap (fetch webpage text via HTTP)
 	- [ ] Web search integration (querying search engine)
+	- [ ] respecting gitignore!
+	- [ ] limiting output size
 - [x] `write` tool
 	- [x] Full file overwrite (creating missing folders automatically)
 	- [x] Substring match-and-replace patch (safety check for uniqueness)
@@ -22,6 +24,18 @@ runtime:
 
 bonus:
 - [x] Policies helper functions (managing allowances and security rules)
-- [x] Minimal CLI Harness
 - [ ] hardening (looking for things that may break, and putting padding there)
 	- [x] Fail when requested config missing
+	- [ ] Retry tool calls (4 attempts, progressive decay)
+	- [ ] Retry LLM calls?
+
+rope:
+- [x] MVP version that can call wrap Bondage into a CLI app - from call to output, including tool use
+- [x] asking user's permission for tool calls
+- [x] loading specified config
+- [x] multiple overlaying configs
+- [x] yolo mode
+- [x] permissions policy in a config
+- [x] pretty-printing help
+- [ ] pretty-printing whole screen, maybe
+- [ ] interactive mode

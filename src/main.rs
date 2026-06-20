@@ -1,3 +1,5 @@
+mod render;
+
 use std::path::PathBuf;
 use std::io::{self, Write};
 use serde::Deserialize;
@@ -186,7 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if help {
-        println!("{}", include_str!("../docs/Rope.md"));
+        render::print_help();
         std::process::exit(0);
     }
 
