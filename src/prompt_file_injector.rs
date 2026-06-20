@@ -72,8 +72,8 @@ fn find_file_references(text: &str, base_dir: &Path) -> Vec<PathBuf> {
     while let Some(at_idx) = search_str.find('@') {
         let post_at = &search_str[at_idx + 1..];
         
-        // Find next '@' or end of string/line to restrict the search segment
-        let limit_idx = post_at.find('@').unwrap_or(post_at.len());
+        // Find next '@', newline, or end of string to restrict the search segment
+        let limit_idx = post_at.find(|c| c == '@' || c == '\n' || c == '\r').unwrap_or(post_at.len());
         let segment = &post_at[..limit_idx];
         
         let words: Vec<&str> = segment.split_whitespace().collect();
@@ -81,7 +81,7 @@ fn find_file_references(text: &str, base_dir: &Path) -> Vec<PathBuf> {
         let mut best_word_count = 0;
 
         // Try greedy prefixes of words
-        for k in 1..=words.len() {
+        for k in 1..=words.len().min(10) {
             let candidate_words = &words[..k];
             let mut candidate = candidate_words.join(" ");
 
