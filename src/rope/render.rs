@@ -31,6 +31,6 @@ pub fn print_markdown(md: &str) {
 }
 
 pub fn print_help() {
-    let help_content = include_str!("../docs/Rope.md");
+    let help_content = include_str!("../../docs/Rope.md");
     print_markdown(help_content);
 }

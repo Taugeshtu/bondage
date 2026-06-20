@@ -16,7 +16,7 @@ termimad = "0.34.1"
 
 [[bin]]
 name = "rope"
-path = "src/main.rs"
+path = "src/rope/main.rs"
 
 
 

@@ -14,6 +14,7 @@ tools:
 - [x] `bash` tool
 	- [x] Shell command execution
 	- [x] Output capture (binding stdout/stderr and exit status codes)
+	- [x] limiting output size
 
 runtime:
 - [x] GenAI Integration
