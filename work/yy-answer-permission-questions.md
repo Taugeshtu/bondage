@@ -1,0 +1,1 @@
+"yy" answer to permission questions, which is "yes and remember yes for this session"

@@ -98,12 +98,11 @@ mod tests {
     use super::*;
     use std::fs;
 
+    static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     fn setup_workspace() -> PathBuf {
-        let test_id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!("bondage_test_write_{}", test_id));
+        let counter = TEST_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temp_dir = std::env::temp_dir().join(format!("bondage_test_write_{}", counter));
         fs::create_dir_all(&temp_dir).unwrap();
         temp_dir
     }

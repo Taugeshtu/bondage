@@ -163,8 +163,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure config dir and baseline settings exist
     ensure_config_installed()?;
 
-    // 1. Parse arguments: -c/--config and collect positional prompt
+    // 1. Parse arguments: -c/--config, -h/--help and collect positional prompt
     let mut config_paths = Vec::new();
+    let mut help = false;
     let mut positional_args = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -175,17 +176,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config_paths.push(path);
                 }
             }
+            "-h" | "--help" => {
+                help = true;
+            }
             other => {
                 positional_args.push(other.to_string());
             }
         }
     }
 
-    if positional_args.is_empty() {
-        eprintln!("Usage: rope [-c <config_path>...] <prompt...>");
-        std::process::exit(1);
+    if help {
+        println!("{}", include_str!("../docs/Rope.md"));
+        std::process::exit(0);
     }
+
     let user_prompt = positional_args.join(" ");
+
+    // Check if we should drop into interactive mode (no prompt provided)
+    let is_interactive = user_prompt.trim().is_empty();
+    if is_interactive {
+        println!("✨ Entering Interactive Mode (Stub)...");
+        // COMMENT: Stub for future interactive session mode.
+        std::process::exit(0);
+    }
 
     // 2. Resolve Config Files and Merge them
     let mut config = Config::default();

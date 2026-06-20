@@ -136,11 +136,9 @@ mod tests {
 
     #[test]
     fn test_path_safety_check() {
-        let temp_id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let base_dir = std::env::temp_dir().join(format!("bondage_policy_test_{}", temp_id));
+        static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let counter = TEST_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let base_dir = std::env::temp_dir().join(format!("bondage_policy_test_{}", counter));
         fs::create_dir_all(&base_dir).unwrap();
 
         let inside_file = base_dir.join("src/lib.rs");
