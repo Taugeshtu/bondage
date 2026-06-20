@@ -3,12 +3,51 @@ use std::io::{self, Write};
 use serde::Deserialize;
 use bondage::{Message, step_stream};
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, Clone)]
 struct Config {
     model: Option<String>,
     api_key: Option<String>,
     endpoint: Option<String>,
     adapter: Option<String>,
+    #[serde(default)]
+    policy: bondage::policy::PolicyConfig,
+}
+
+impl Config {
+    fn merge(&mut self, other: Config) {
+        if other.model.is_some() {
+            self.model = other.model;
+        }
+        if other.api_key.is_some() {
+            self.api_key = other.api_key;
+        }
+        if other.endpoint.is_some() {
+            self.endpoint = other.endpoint;
+        }
+        if other.adapter.is_some() {
+            self.adapter = other.adapter;
+        }
+        
+        // Merge policy fields
+        if other.policy.access_lookup_directory.is_some() {
+            self.policy.access_lookup_directory = other.policy.access_lookup_directory;
+        }
+        if other.policy.access_lookup_fs.is_some() {
+            self.policy.access_lookup_fs = other.policy.access_lookup_fs;
+        }
+        if other.policy.access_lookup_web.is_some() {
+            self.policy.access_lookup_web = other.policy.access_lookup_web;
+        }
+        if other.policy.access_write_directory.is_some() {
+            self.policy.access_write_directory = other.policy.access_write_directory;
+        }
+        if other.policy.access_write_fs.is_some() {
+            self.policy.access_write_fs = other.policy.access_write_fs;
+        }
+        if other.policy.access_bash.is_some() {
+            self.policy.access_bash = other.policy.access_bash;
+        }
+    }
 }
 
 fn ask_approval(tool_name: &str, args: &str) -> bool {
@@ -76,14 +115,17 @@ fn resolve_config_path(config_path_str: Option<&str>) -> std::io::Result<PathBuf
         }
     }
 
-    // Default to the first candidate as a direct path if nothing exists
-    Ok(PathBuf::from(&candidates[0]))
+    // If raw_path was explicitly requested but not found, return NotFound error
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        format!("Config file '{}' not found in CWD or ~/.config/rope/", raw_path),
+    ))
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Parse arguments: -c/--config, -y/--yolo, and collect positional prompt
-    let mut config_path_str = None;
+    let mut config_paths = Vec::new();
     let mut yolo = false;
     let mut positional_args = Vec::new();
 
@@ -91,7 +133,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-c" | "--config" => {
-                config_path_str = args.next();
+                if let Some(path) = args.next() {
+                    config_paths.push(path);
+                }
             }
             "-y" | "--yolo" => {
                 yolo = true;
@@ -103,15 +147,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if positional_args.is_empty() {
-        eprintln!("Usage: rope [-c <config_path>] [-y|--yolo] <prompt...>");
+        eprintln!("Usage: rope [-c <config_path>...] [-y|--yolo] <prompt...>");
         std::process::exit(1);
     }
     let user_prompt = positional_args.join(" ");
 
-    // 2. Resolve Config File
-    let config_path = resolve_config_path(config_path_str.as_deref())?;
-
-    let config = load_config(&config_path);
+    // 2. Resolve Config Files and Merge them
+    let mut config = Config::default();
+    if config_paths.is_empty() {
+        if let Ok(default_path) = resolve_config_path(None) {
+            config = load_config(&default_path);
+        }
+    } else {
+        for path_str in &config_paths {
+            let path = resolve_config_path(Some(path_str))?;
+            let loaded = load_config(&path);
+            config.merge(loaded);
+        }
+    }
 
     // 3. Inject keys dynamically into environment before initializing Client
     if let Some(key) = &config.api_key {
@@ -168,7 +221,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let processed_prompt = bondage::prompt_file_injector::process_prompt(&user_prompt)?;
 
-    // 5. Setup tools and history
+    // 5. Setup policy, tools and history
+    let policy = bondage::policy::Policy::from_config(&config.policy);
     let tools = bondage::tools::get_standard_tools();
     let mut history = vec![
         Message::System("You are Bondage, a stateless actor core. You have access to the 'lookup' and 'write' tools. Use 'lookup' to inspect files or directories, and 'write' to create, edit, or patch files. Keep your answers concise.".to_string()),
@@ -193,11 +247,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Message::ModelToolRequest { id, name, arguments } = msg {
                 has_tool_calls = true;
                 
-                let approved = yolo || ask_approval(&name, &arguments);
-                if approved {
-                    if yolo {
-                        println!("\n⚡ [YOLO Mode] Auto-approving execution of: {} ({})", name, arguments.trim());
+                let policy_mode = match name.as_str() {
+                    "lookup" => {
+                        if let Ok(args) = serde_json::from_str::<bondage::tools::tool_lookup::LookupArgs>(&arguments) {
+                            policy.check_lookup(&args.target, &current_dir)
+                        } else {
+                            bondage::policy::PolicyMode::Ask
+                        }
                     }
+                    "write" => {
+                        if let Ok(args) = serde_json::from_str::<bondage::tools::tool_write::WriteArgs>(&arguments) {
+                            policy.check_write(&args.path, &current_dir)
+                        } else {
+                            bondage::policy::PolicyMode::Ask
+                        }
+                    }
+                    _ => bondage::policy::PolicyMode::Ask,
+                };
+
+                let approved = match policy_mode {
+                    bondage::policy::PolicyMode::Yes => Some(true),
+                    bondage::policy::PolicyMode::No => Some(false),
+                    bondage::policy::PolicyMode::Ask => {
+                        if yolo {
+                            println!("\n⚡ [YOLO Mode] Auto-approving execution of: {} ({})", name, arguments.trim());
+                            Some(true)
+                        } else if ask_approval(&name, &arguments) {
+                            Some(true)
+                        } else {
+                            None // Denied by user
+                        }
+                    }
+                };
+
+                if approved == Some(true) {
                     println!("▶️ Executing {}...", name);
                     let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
                     
@@ -209,11 +292,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     history.push(tool_result);
                 } else {
-                    println!("❌ Denied.");
+                    let (reason, _is_policy_block) = match policy_mode {
+                        bondage::policy::PolicyMode::No => {
+                            println!("❌ [Blocked by Policy] Rejection sent to agent.");
+                            // COMMENT: We report a policy block message here. Can customize this report later.
+                            ("Permission Denied: execution blocked by safety policy.".to_string(), true)
+                        }
+                        _ => {
+                            println!("❌ Denied.");
+                            ("Permission Denied by User".to_string(), false)
+                        }
+                    };
                     history.push(Message::ToolResponse {
                         id,
                         name,
-                        content: "Permission Denied by User".to_string(),
+                        content: reason,
                         is_error: true,
                     });
                 }

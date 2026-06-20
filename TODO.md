@@ -21,6 +21,7 @@ runtime:
 	- [x] Implement step_stream logic with text delta filtering
 
 bonus:
-- [ ] Policies helper functions (managing allowances and security rules)
+- [x] Policies helper functions (managing allowances and security rules)
 - [x] Minimal CLI Harness
 - [ ] hardening (looking for things that may break, and putting padding there)
+	- [x] Fail when requested config missing

@@ -4,6 +4,7 @@ use futures_util::StreamExt;
 pub mod tools;
 pub mod util;
 pub mod prompt_file_injector;
+pub mod policy;
 
 // Re-export GenAI's client types directly so library consumers 
 // can pass them to step without wrappers.
