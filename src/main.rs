@@ -1,4 +1,5 @@
 mod render;
+mod tmux;
 
 use std::path::PathBuf;
 use std::io::{self, Write};
@@ -160,6 +161,125 @@ access_bash = "yes"
     Ok(())
 }
 
+async fn execute_bash_tmux(
+    id: &str,
+    arguments: &str,
+    current_dir: &std::path::Path,
+) -> Message {
+    let args: Result<bondage::tools::tool_bash::BashArgs, _> = serde_json::from_str(arguments);
+    let command_to_run = match args {
+        Ok(a) => a.command,
+        Err(e) => {
+            return Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: format!("Failed to parse arguments: {}", e),
+                is_error: true,
+            };
+        }
+    };
+
+    let pid = std::process::id();
+    let session_name = format!("rope-shell-{}", pid);
+
+    // 1. Ensure tmux session exists
+    if !tmux::has_session(&session_name) {
+        if let Err(e) = tmux::start_session(&session_name, current_dir) {
+            return Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: format!("Failed to start tmux session: {}", e),
+                is_error: true,
+            };
+        }
+    }
+
+    // 2. Send the command (without enter)
+    if let Err(e) = tmux::send_command(&session_name, &command_to_run) {
+        return Message::ToolResponse {
+            id: id.to_string(),
+            name: "bash".to_string(),
+            content: format!("Failed to send command to tmux: {}", e),
+            is_error: true,
+        };
+    }
+
+    // 3. Pop the terminal
+    println!("📺 Popping interactive terminal window (Alacritty / Tmux Split)...");
+    let mut term_handle = match tmux::pop_terminal(&session_name) {
+        Ok(handle) => handle,
+        Err(e) => {
+            return Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: format!("Failed to spawn terminal: {}", e),
+                is_error: true,
+            };
+        }
+    };
+
+    // 4. Polling loop
+    println!("⏳ Waiting for user to press Enter in terminal to run command...");
+    let poll_interval = std::time::Duration::from_millis(200);
+    let output_content;
+
+    loop {
+        tokio::time::sleep(poll_interval).await;
+
+        let should_cancel = match &mut term_handle {
+            Some(tmux::TerminalHandle::Gui(child)) => {
+                child.try_wait().map(|opt| opt.is_some()).unwrap_or(false)
+            }
+            Some(tmux::TerminalHandle::Tty(_pane_id)) => {
+                !tmux::has_attached_clients(&session_name)
+            }
+            None => false,
+        };
+
+        if should_cancel {
+            // Send Ctrl+C to clear the pending command line in the session
+            let _ = tmux::send_command(&session_name, "C-c");
+            
+            // Clean up display window/pane if still running
+            if let Some(h) = term_handle {
+                let _ = tmux::close_terminal(h);
+            }
+            
+            return Message::ToolResponse {
+                id: id.to_string(),
+                name: "bash".to_string(),
+                content: "Permission Denied: terminal window/split closed or cancelled by user.".to_string(),
+                is_error: true,
+            };
+        }
+
+        // Fetch current pane content
+        if let Ok(content) = tmux::get_pane_content(&session_name) {
+            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+            if let Some(&last_line) = lines.last() {
+                if let Ok(idle) = tmux::is_pane_idle(&session_name) {
+                    if idle && !last_line.trim().ends_with(&command_to_run) {
+                        output_content = content;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Cleanup the display interface, but KEEP the session running
+    if let Some(h) = term_handle {
+        let _ = tmux::close_terminal(h);
+    }
+
+    Message::ToolResponse {
+        id: id.to_string(),
+        name: "bash".to_string(),
+        content: output_content,
+        is_error: false,
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure config dir and baseline settings exist
@@ -312,6 +432,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             bondage::policy::PolicyMode::Ask
                         }
                     }
+                    "bash" => {
+                        policy.check_bash()
+                    }
                     _ => bondage::policy::PolicyMode::Ask,
                 };
 
@@ -319,7 +442,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     bondage::policy::PolicyMode::Yes => Some(true),
                     bondage::policy::PolicyMode::No => Some(false),
                     bondage::policy::PolicyMode::Ask => {
-                        if ask_approval(&name, &arguments) {
+                        if name == "bash" {
+                            Some(true) // Auto-approve the launch for bash; the popped window is the approval mechanism
+                        } else if ask_approval(&name, &arguments) {
                             Some(true)
                         } else {
                             None // Denied by user
@@ -332,7 +457,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("\n⚡ [Auto-approved by Policy] {} ({})", name, arguments.trim());
                     }
                     println!("▶️ Executing {}...", name);
-                    let tool_result = bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await;
+                    
+                    let tool_result = if name == "bash" {
+                        execute_bash_tmux(&id, &arguments, &current_dir).await
+                    } else {
+                        bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await
+                    };
                     
                     if let Message::ToolResponse { content, is_error, .. } = &tool_result {
                         let status = if *is_error { "ERROR" } else { "SUCCESS" };
@@ -366,6 +496,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !has_tool_calls {
             break;
         }
+    }
+
+    let pid = std::process::id();
+    let session_name = format!("rope-shell-{}", pid);
+    if tmux::has_session(&session_name) {
+        let _ = tmux::kill_session(&session_name);
     }
 
     Ok(())
