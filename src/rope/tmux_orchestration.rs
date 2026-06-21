@@ -15,7 +15,12 @@ pub fn ask_approval(tool_name: &str, args: &str) -> bool {
     }
 }
 
+pub static ENABLE_LOGGING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn log_debug(msg: &str) {
+    if !ENABLE_LOGGING.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -194,8 +199,28 @@ pub async fn execute_bash_tmux(
             fallback_to_inline_approval = true;
         }
 
-        // Wait for terminal connection and screen resize to settle before capturing baseline
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        // Wait for terminal connection to attach and screen resize to settle before capturing baseline
+        log_debug("Waiting for terminal client to attach...");
+        let mut attached = false;
+        let attach_poll_interval = std::time::Duration::from_millis(50);
+        let mut waited_ms = 0;
+        for _ in 0..60 { // wait up to 3 seconds max
+            if tmux_utils::has_attached_clients(&session_name) {
+                attached = true;
+                log_debug(&format!("Client attachment detected after {}ms", waited_ms));
+                break;
+            }
+            tokio::time::sleep(attach_poll_interval).await;
+            waited_ms += 50;
+        }
+
+        if !attached {
+            log_debug("Warning: Timeout waiting for client attachment. Capture baseline anyway.");
+        }
+
+        // Give tmux a tiny moment (50ms) to finish redraw/resize after attachment
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
         let initial_state = tmux_utils::get_pane_cursor_state(&session_name).unwrap_or((0, 0));
         initial_val = initial_state.0 + initial_state.1;
         log_debug(&format!("Captured initial state (post-resize): history={}, cursor_y={}, total={}", initial_state.0, initial_state.1, initial_val));

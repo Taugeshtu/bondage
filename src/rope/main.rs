@@ -49,9 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure config dir and baseline settings exist
     ensure_config_installed()?;
 
-    // 1. Parse arguments: -c/--config, -h/--help and collect positional prompt
+    // 1. Parse arguments: -c/--config, -h/--help, -l/--log and collect positional prompt
     let mut config_paths = Vec::new();
     let mut help = false;
+    let mut enable_logging = false;
     let mut positional_args = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -65,10 +66,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "-h" | "--help" => {
                 help = true;
             }
+            "-l" | "--log" => {
+                enable_logging = true;
+            }
             other => {
                 positional_args.push(other.to_string());
             }
         }
+    }
+
+    if enable_logging {
+        tmux_orchestration::ENABLE_LOGGING.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     if help {

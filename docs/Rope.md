@@ -1,6 +1,6 @@
 **Rope** - the MVP of **Bondage** *(a.k.a. "just barely enough harness to have fun")*
 
-  > `rope [-c <config_name>...] [-h|--help] [<prompt...>]`
+  > `rope [-c <config_name>...] [-h|--help] [-l|--log] [<prompt...>]`
 
 ### Interactive mode
   (NotImplementedException) launch with empty prompt
@@ -12,6 +12,9 @@
   `.toml` extension appended automatically
   resolved in order: `CWD` local path -> `~/.config/rope/`
   overlayed: settings in later configs (like `-c yolo`) override previous ones
+
+### Logging
+  `-l` or `--log` flag will output detailed execution trace logs into `rope_debug.log` in the active CWD.
 
 ### Permissions policy
   set via config, see `~/.config/rope/yolo.toml` for all the knobs. Values: `yes`|`no`|`ask`
