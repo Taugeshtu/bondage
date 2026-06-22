@@ -2,6 +2,7 @@ mod config;
 mod tmux_utils;
 mod tmux_orchestration;
 mod render;
+mod interactive;
 
 use std::io::{self, Write};
 use bondage::{Message, step_stream};
@@ -49,10 +50,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure config dir and baseline settings exist
     ensure_config_installed()?;
 
-    // 1. Parse arguments: -c/--config, -h/--help, -l/--log and collect positional prompt
+    // 1. Parse arguments: -c/--config, -h/--help, -l/--log, -i/--interactive and collect positional prompt
     let mut config_paths = Vec::new();
     let mut help = false;
     let mut enable_logging = false;
+    let mut interactive_file = None;
     let mut positional_args = Vec::new();
 
     let mut args = std::env::args().skip(1);
@@ -68,6 +70,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "-l" | "--log" => {
                 enable_logging = true;
+            }
+            "-i" | "--interactive" => {
+                if let Some(path) = args.next() {
+                    interactive_file = Some(path);
+                } else {
+                    eprintln!("Error: -i/--interactive requires a file path argument.");
+                    std::process::exit(1);
+                }
             }
             other => {
                 positional_args.push(other.to_string());
@@ -85,14 +95,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let user_prompt = positional_args.join(" ");
-
-    // Check if we should drop into interactive mode (no prompt provided)
-    let is_interactive = user_prompt.trim().is_empty();
-    if is_interactive {
-        println!("✨ Entering Interactive Mode (Stub)...");
-        // COMMENT: Stub for future interactive session mode.
-        std::process::exit(0);
-    }
 
     // 2. Resolve Config Files and Merge them
     let mut config = Config::default();
@@ -159,6 +161,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .unwrap_or_else(|| std::env::var("BONDAGE_MODEL").unwrap_or_else(|_| "gemini-1.5-flash".to_string()));
 
+    // If interactive mode file is specified, launch it
+    if let Some(ref file_path) = interactive_file {
+        let path = std::path::PathBuf::from(file_path);
+        if let Err(e) = interactive::run_file_sitter(path, config, client, model).await {
+            eprintln!("Error in interactive file-sitter: {}", e);
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+
+    if user_prompt.trim().is_empty() {
+        println!("✨ Entering Interactive Mode (Stub)...");
+        println!("Use `rope -i <session_file.md>` to launch the file-sitter interactive mode.");
+        std::process::exit(0);
+    }
+
     let current_dir = std::env::current_dir()?;
 
     let processed_prompt = bondage::prompt_file_injector::process_prompt(&user_prompt)?;
@@ -166,8 +184,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Setup policy, tools and history
     let policy = bondage::policy::Policy::from_config(&config.policy);
     let tools = bondage::tools::get_standard_tools();
+    let tools_block = bondage::util::format_tools_block(&tools);
+    let system_prompt = include_str!("../../docs/system-regular.txt")
+        .replace("{TOOLS}", &tools_block);
     let mut history = vec![
-        Message::System("You are Bondage, a stateless actor core. You have access to the 'lookup' and 'write' tools. Use 'lookup' to inspect files or directories, and 'write' to create, edit, or patch files. Keep your answers concise.".to_string()),
+        Message::System(system_prompt),
         Message::User(processed_prompt),
     ];
 

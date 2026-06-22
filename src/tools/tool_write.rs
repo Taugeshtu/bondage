@@ -9,13 +9,12 @@ pub struct WriteArgs {
     pub old_content: Option<String>,
 }
 
-/// Helper to resolve target path relative to the base directory
 fn resolve_path(base_dir: &Path, path_str: &str) -> PathBuf {
-    let path = Path::new(path_str);
-    if path.is_absolute() {
-        path.to_path_buf()
+    let expanded = crate::util::expand_tilde(Path::new(path_str));
+    if expanded.is_absolute() {
+        expanded
     } else {
-        base_dir.join(path)
+        base_dir.join(expanded)
     }
 }
 

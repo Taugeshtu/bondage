@@ -70,11 +70,11 @@ impl Policy {
         if target == "web" || target.starts_with("http://") || target.starts_with("https://") {
             self.lookup_web
         } else {
-            let path = Path::new(target);
-            let resolved = if path.is_absolute() {
-                path.to_path_buf()
+            let expanded = crate::util::expand_tilde(Path::new(target));
+            let resolved = if expanded.is_absolute() {
+                expanded
             } else {
-                base_dir.join(path)
+                base_dir.join(expanded)
             };
             
             if is_path_inside_base(base_dir, &resolved) {
@@ -86,11 +86,11 @@ impl Policy {
     }
 
     pub fn check_write(&self, target_path: &str, base_dir: &Path) -> PolicyMode {
-        let path = Path::new(target_path);
-        let resolved = if path.is_absolute() {
-            path.to_path_buf()
+        let expanded = crate::util::expand_tilde(Path::new(target_path));
+        let resolved = if expanded.is_absolute() {
+            expanded
         } else {
-            base_dir.join(path)
+            base_dir.join(expanded)
         };
         
         if is_path_inside_base(base_dir, &resolved) {
@@ -148,5 +148,29 @@ mod tests {
         assert!(!is_path_inside_base(&base_dir, &outside_file));
 
         fs::remove_dir_all(&base_dir).unwrap();
+    }
+
+    #[test]
+    fn test_policy_tilde_expansion() {
+        let config = PolicyConfig {
+            access_lookup_directory: Some(PolicyMode::Yes),
+            access_lookup_fs: Some(PolicyMode::No),
+            access_write_directory: Some(PolicyMode::Yes),
+            access_write_fs: Some(PolicyMode::No),
+            ..Default::default()
+        };
+        let policy = Policy::from_config(&config);
+        
+        let base_dir = std::path::Path::new("/media/veracrypt1/_PROJECTS/_LinuxUX/Bondage");
+        
+        unsafe {
+            std::env::set_var("HOME", "/home/testuser");
+        }
+        
+        let mode = policy.check_lookup("~/K/Catch-all/", base_dir);
+        assert_eq!(mode, PolicyMode::No);
+        
+        let mode_write = policy.check_write("~/K/Catch-all/file.txt", base_dir);
+        assert_eq!(mode_write, PolicyMode::No);
     }
 }

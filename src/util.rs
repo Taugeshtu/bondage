@@ -195,9 +195,66 @@ pub fn truncate_text(
     result
 }
 
+/// Helper to construct a tools block for injection into system prompts.
+pub fn format_tools_block(tools: &[crate::ToolDefinition]) -> String {
+    let mut block = String::new();
+    for tool in tools {
+        block.push_str(&format!("- {}: {}\n", tool.name, tool.description));
+    }
+    block.trim_end().to_string()
+}
+
+/// Expands a path starting with tilde `~` to the absolute path using the `HOME` environment variable.
+pub fn expand_tilde(path: &std::path::Path) -> std::path::PathBuf {
+    let path_str = path.to_string_lossy();
+    if path_str == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home);
+        }
+    } else if path_str.starts_with("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            let mut new_path = std::path::PathBuf::from(home);
+            new_path.push(&path_str[2..]);
+            return new_path;
+        }
+    }
+    path.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_tools_block() {
+        let tools = vec![
+            crate::ToolDefinition {
+                name: "test_tool".to_string(),
+                description: "This is a test tool".to_string(),
+                parameters: serde_json::Value::Null,
+            }
+        ];
+        let block = format_tools_block(&tools);
+        assert_eq!(block, "- test_tool: This is a test tool");
+    }
+
+    #[test]
+    fn test_expand_tilde() {
+        unsafe {
+            std::env::set_var("HOME", "/home/testuser");
+        }
+        let path = std::path::Path::new("~/documents/file.txt");
+        let expanded = expand_tilde(path);
+        assert_eq!(expanded.to_str().unwrap(), "/home/testuser/documents/file.txt");
+
+        let path_exact = std::path::Path::new("~");
+        let expanded_exact = expand_tilde(path_exact);
+        assert_eq!(expanded_exact.to_str().unwrap(), "/home/testuser");
+
+        let path_other = std::path::Path::new("/some/other/path");
+        let expanded_other = expand_tilde(path_other);
+        assert_eq!(expanded_other.to_str().unwrap(), "/some/other/path");
+    }
 
     #[test]
     fn test_truncate_text_no_truncation() {

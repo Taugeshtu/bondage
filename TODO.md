@@ -35,6 +35,8 @@ bonus:
 	- [x] Support multi-line command output polling in tmux pipeline
 	- [ ] Retry tool calls (4 attempts, progressive decay)
 	- [ ] Retry LLM calls?
+	- [ ] What if write in patch mode fails because didn't match content?
+	- [x] Fix path resolution failing on tilde `~` expansion and mergerFS mounts (e.g. `~/K/Catch-all/`)
 
 rope:
 - [x] MVP version that can call wrap Bondage into a CLI app - from call to output, including tool use
@@ -45,5 +47,5 @@ rope:
 - [x] permissions policy in a config
 - [x] pretty-printing help
 - [ ] pretty-printing whole screen, maybe
-- [ ] interactive mode
+- [x] interactive mode
 
