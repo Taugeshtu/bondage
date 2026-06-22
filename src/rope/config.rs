@@ -63,55 +63,9 @@ pub fn load_config(config_path: &Path) -> Config {
     Config::default()
 }
 
-pub fn resolve_config_path(config_path_str: Option<&str>) -> std::io::Result<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let config_dir = PathBuf::from(&home).join(".config/rope");
 
-    let Some(raw_path) = config_path_str else {
-        // Default config path fallback
-        return Ok(config_dir.join("config.toml"));
-    };
 
-    // Build filename candidates
-    let mut candidates = Vec::new();
-    if raw_path.to_lowercase().ends_with(".toml") {
-        candidates.push(raw_path.to_string());
-    } else {
-        candidates.push(format!("{}.toml", raw_path));
-        candidates.push(raw_path.to_string());
-    }
-
-    let current_dir = std::env::current_dir()?;
-
-    // Search candidates in order
-    for candidate in &candidates {
-        // 1. Direct path / relative to CWD
-        let direct = PathBuf::from(candidate);
-        if direct.exists() {
-            return Ok(direct);
-        }
-
-        // 2. CWD joined
-        let cwd_joined = current_dir.join(candidate);
-        if cwd_joined.exists() {
-            return Ok(cwd_joined);
-        }
-
-        // 3. ~/.config/rope/ joined
-        let config_joined = config_dir.join(candidate);
-        if config_joined.exists() {
-            return Ok(config_joined);
-        }
-    }
-
-    // If raw_path was explicitly requested but not found, return NotFound error
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        format!("Config file '{}' not found in CWD or ~/.config/rope/", raw_path),
-    ))
-}
-
-pub fn ensure_config_installed() -> std::io::Result<()> {
+pub fn ensure_resources_installed() -> std::io::Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let config_dir = PathBuf::from(&home).join(".config/rope");
 
@@ -142,6 +96,20 @@ access_bash = "yes"
 "#;
         std::fs::write(&config_path, config_template)?;
         println!("✨ Created default config template at {}", config_path.display());
+    }
+
+    let regular_prompt_path = config_dir.join("system-regular.txt");
+    if !regular_prompt_path.exists() {
+        let regular_template = include_str!("../../docs/system-regular.txt");
+        std::fs::write(&regular_prompt_path, regular_template)?;
+        println!("✨ Created default system-regular.txt prompt at {}", regular_prompt_path.display());
+    }
+
+    let interactive_prompt_path = config_dir.join("system-interactive.txt");
+    if !interactive_prompt_path.exists() {
+        let interactive_template = include_str!("../../docs/system-interactive.txt");
+        std::fs::write(&interactive_prompt_path, interactive_template)?;
+        println!("✨ Created default system-interactive.txt prompt at {}", interactive_prompt_path.display());
     }
 
     Ok(())

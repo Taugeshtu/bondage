@@ -1,11 +1,21 @@
 **Rope** - the MVP of **Bondage** *(a.k.a. "just barely enough harness to have fun")*
 
-  > `rope [-c <config_name>...] [-h|--help] [-l|--log] [-i|--interactive <file>] [<prompt...>]`
+  > `rope [-h|--help]`
+  > `rope [-c <config_name>...] [-s <system_name>...] [-l|--log] [--no-tmux|--notmux] [<prompt...>|"<prompt...>"]`
+  > `rope [-c <config_name>...] [-s <system_name>...] [-l|--log] [--no-tmux|--notmux] [-i|--interactive <file>]`
 
 ### Interactive mode (File-Sitter)
   Run with `-i <file>` or `--interactive <file>` to launch the file-sitter interactive mode.
   It watches a markdown file (e.g. `session.md`) for changes, triggers an LLM turn when the file is saved containing the `@rope` activation tag, and auto-approves write calls to the session file itself.
   To fork a session, simply copy the session markdown file and run a separate `rope -i` process on it.
+
+### System Prompts
+  `-s <name>` or `--system <name>` flag loads system prompt files (checks CWD first, then `~/.config/rope/`).
+  Multiple system prompts can be specified to overlay (concatenate) them.
+  If not specified, defaults to loading `system-regular.txt` (or `system-interactive.txt` in file-sitter mode) from `~/.config/rope/`.
+
+### Headless Execution
+  `--no-tmux` or `--notmux` bypasses the Tmux split-screen bootstrapping environment.
 
 ### File Injections
   `@path/to/file` inside the prompt = automatically embed their contents (supports `@spaced filenames.txt` and level-1 recursive nesting)

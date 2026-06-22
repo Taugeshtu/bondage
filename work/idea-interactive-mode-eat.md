@@ -1,0 +1,1 @@
+idea: interactive mode that can eat not just a file, but a whole folder. Respecting gitignore, tree-sitting, watching file changes; if there are invocations for rope anywhere - those files get blobbed into the prompt (if too big -

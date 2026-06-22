@@ -204,6 +204,63 @@ pub fn format_tools_block(tools: &[crate::ToolDefinition]) -> String {
     block.trim_end().to_string()
 }
 
+/// Unified resource finder logic.
+/// Resolves a resource name or path:
+/// 1. If explicit, checks CWD (base_dir), then checks `~/.config/rope/`. Returns error if missing.
+/// 2. If implicit (e.g. default configuration or prompts when not specified), checks `~/.config/rope/` only.
+pub fn locate_resource(
+    name: &str,
+    is_explicit: bool,
+    base_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let config_dir = std::path::PathBuf::from(&home).join(".config/rope");
+
+    let candidate = std::path::Path::new(name);
+    let expanded = expand_tilde(candidate);
+
+    if is_explicit {
+        if expanded.is_absolute() {
+            if expanded.exists() {
+                return Ok(expanded);
+            }
+        } else {
+            let cwd_joined = base_dir.join(&expanded);
+            if cwd_joined.exists() {
+                return Ok(cwd_joined);
+            }
+        }
+
+        if !expanded.is_absolute() {
+            let config_joined = config_dir.join(&expanded);
+            if config_joined.exists() {
+                return Ok(config_joined);
+            }
+        }
+
+        Err(format!(
+            "Resource '{}' not found in CWD ({}) or ~/.config/rope/",
+            name,
+            base_dir.display()
+        ))
+    } else {
+        if expanded.is_absolute() {
+            if expanded.exists() {
+                return Ok(expanded);
+            }
+        } else {
+            let config_joined = config_dir.join(&expanded);
+            if config_joined.exists() {
+                return Ok(config_joined);
+            }
+        }
+        Err(format!(
+            "Default resource '{}' not found in ~/.config/rope/",
+            name
+        ))
+    }
+}
+
 /// Expands a path starting with tilde `~` to the absolute path using the `HOME` environment variable.
 pub fn expand_tilde(path: &std::path::Path) -> std::path::PathBuf {
     let path_str = path.to_string_lossy();
@@ -224,6 +281,25 @@ pub fn expand_tilde(path: &std::path::Path) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_locate_resource() {
+        let temp_dir = std::env::temp_dir().join("bondage_locate_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        
+        let file_path = temp_dir.join("test_res.txt");
+        std::fs::write(&file_path, "content").unwrap();
+
+        // Test explicit resolution in base_dir
+        let resolved = locate_resource("test_res.txt", true, &temp_dir).unwrap();
+        assert_eq!(resolved, file_path);
+
+        // Test explicit resolution fails when file is missing
+        let err = locate_resource("nonexistent_res.txt", true, &temp_dir);
+        assert!(err.is_err());
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
 
     #[test]
     fn test_format_tools_block() {

@@ -1,19 +1,21 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 
-pub fn process_prompt(prompt: &str) -> std::io::Result<String> {
-    let current_dir = std::env::current_dir()?;
+pub fn process_prompt(prompt: &str) -> Result<String, Vec<String>> {
+    let current_dir = std::env::current_dir().map_err(|e| vec![e.to_string()])?;
     process_prompt_in_dir(prompt, &current_dir)
 }
 
-pub fn process_prompt_in_dir(prompt: &str, base_dir: &Path) -> std::io::Result<String> {
+pub fn process_prompt_in_dir(prompt: &str, base_dir: &Path) -> Result<String, Vec<String>> {
     let mut expanded_prompt = prompt.to_string();
     let mut processed_files = HashSet::new();
     let mut level_0_files = Vec::new();
     let mut level_1_files = Vec::new();
+    let mut all_errors = Vec::new();
 
     // 1. Extract Level 0 files directly from the prompt
-    let level_0_refs = find_file_references(prompt, base_dir);
+    let (level_0_refs, mut level_0_errors) = find_file_references(prompt, base_dir);
+    all_errors.append(&mut level_0_errors);
 
     for path in level_0_refs {
         let path_str = path.to_string_lossy().to_string();
@@ -33,7 +35,8 @@ pub fn process_prompt_in_dir(prompt: &str, base_dir: &Path) -> std::io::Result<S
     // 2. Extract Level 1 files from Level 0 contents (recursive depth = 1)
     for (name, content, parent_path) in &level_0_files {
         let parent_dir = parent_path.parent().unwrap_or(base_dir);
-        let level_1_refs = find_file_references(content, parent_dir);
+        let (level_1_refs, mut level_1_errors) = find_file_references(content, parent_dir);
+        all_errors.append(&mut level_1_errors);
         
         for path in level_1_refs {
             let path_str = path.to_string_lossy().to_string();
@@ -48,6 +51,10 @@ pub fn process_prompt_in_dir(prompt: &str, base_dir: &Path) -> std::io::Result<S
                 }
             }
         }
+    }
+
+    if !all_errors.is_empty() {
+        return Err(all_errors);
     }
 
     // 3. Assemble the final prompt
@@ -65,18 +72,30 @@ pub fn process_prompt_in_dir(prompt: &str, base_dir: &Path) -> std::io::Result<S
     Ok(expanded_prompt)
 }
 
-fn find_file_references(text: &str, base_dir: &Path) -> Vec<PathBuf> {
+fn find_file_references(text: &str, base_dir: &Path) -> (Vec<PathBuf>, Vec<String>) {
     let mut refs = Vec::new();
+    let mut errors = Vec::new();
     let mut search_str = text;
 
     while let Some(at_idx) = search_str.find('@') {
         let post_at = &search_str[at_idx + 1..];
         
+        // Skip control words like @rope or @rope-done
+        if post_at.starts_with("rope") {
+            search_str = &search_str[at_idx + 1..];
+            continue;
+        }
+
         // Find next '@', newline, or end of string to restrict the search segment
         let limit_idx = post_at.find(|c| c == '@' || c == '\n' || c == '\r').unwrap_or(post_at.len());
         let segment = &post_at[..limit_idx];
         
         let words: Vec<&str> = segment.split_whitespace().collect();
+        if words.is_empty() {
+            search_str = &search_str[at_idx + 1..];
+            continue;
+        }
+
         let mut best_match = None;
         let mut best_word_count = 0;
 
@@ -105,14 +124,9 @@ fn find_file_references(text: &str, base_dir: &Path) -> Vec<PathBuf> {
                 break;
             }
 
-            let path = if Path::new(&candidate).is_absolute() {
-                PathBuf::from(&candidate)
-            } else {
-                base_dir.join(&candidate)
-            };
-
-            if path.exists() && path.is_file() {
-                best_match = Some(path);
+            // Use the unified locate_resource logic
+            if let Ok(resolved) = crate::util::locate_resource(&candidate, true, base_dir) {
+                best_match = Some(resolved);
                 best_word_count = k;
             }
         }
@@ -128,12 +142,19 @@ fn find_file_references(text: &str, base_dir: &Path) -> Vec<PathBuf> {
             let consumed_len = at_idx + 1 + end_offset_in_segment;
             search_str = &search_str[consumed_len..];
         } else {
+            // Emitted as error since resource is specified but missing
+            let first_word = words[0];
+            errors.push(format!(
+                "Resource '@{}' not found in CWD ({}) or ~/.config/rope/",
+                first_word,
+                base_dir.display()
+            ));
             // No match, advance past the '@' character
             search_str = &search_str[at_idx + 1..];
         }
     }
 
-    refs
+    (refs, errors)
 }
 
 #[cfg(test)]
@@ -165,7 +186,8 @@ mod tests {
 
         // 1. Basic matches with spaces and punctuation
         let input = "Check out @foo bar.txt, and also @baz.rs. Thanks!";
-        let refs = find_file_references(input, &temp_dir);
+        let (refs, errors) = find_file_references(input, &temp_dir);
+        assert!(errors.is_empty(), "Expected no errors: {:?}", errors);
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0], file1_path);
         assert_eq!(refs[1], file2_path);
@@ -187,7 +209,8 @@ mod tests {
         writeln!(f2, "foo bar content").unwrap();
 
         let input = "Process @foo bar now";
-        let refs = find_file_references(input, &temp_dir);
+        let (refs, errors) = find_file_references(input, &temp_dir);
+        assert!(errors.is_empty());
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0], foo_bar_path);
 
