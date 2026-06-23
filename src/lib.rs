@@ -5,21 +5,27 @@ pub mod tools;
 pub mod util;
 pub mod prompt_file_injector;
 pub mod policy;
+pub mod kit;
 
 // Re-export GenAI's client types directly so library consumers 
 // can pass them to step without wrappers.
 pub use genai::{Client as GenaiClient, chat::ChatOptions};
+
+/// A tool call requested by the model. Also used as the payload inside
+/// `Message::ModelToolRequest(ToolCall)` — one struct, no duplication.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String, // JSON payload string
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Message {
     System(String),
     User(String),
     ModelText(String),
-    ModelToolRequest {
-        id: String,
-        name: String,
-        arguments: String, // JSON payload string
-    },
+    ModelToolRequest(ToolCall),
     ToolResponse {
         id: String,
         name: String,

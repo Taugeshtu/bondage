@@ -311,19 +311,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for msg in response_msgs {
             history.push(msg.clone());
             
-            if let Message::ModelToolRequest { id, name, arguments } = msg {
+            if let Message::ModelToolRequest(call) = msg {
                 has_tool_calls = true;
                 
-                let policy_mode = match name.as_str() {
+                let policy_mode = match call.name.as_str() {
                     "lookup" => {
-                        if let Ok(args) = serde_json::from_str::<bondage::tools::tool_lookup::LookupArgs>(&arguments) {
+                        if let Ok(args) = serde_json::from_str::<bondage::tools::tool_lookup::LookupArgs>(&call.arguments) {
                             policy.check_lookup(&args.target, &current_dir)
                         } else {
                             bondage::policy::PolicyMode::Ask
                         }
                     }
                     "write" => {
-                        if let Ok(args) = serde_json::from_str::<bondage::tools::tool_write::WriteArgs>(&arguments) {
+                        if let Ok(args) = serde_json::from_str::<bondage::tools::tool_write::WriteArgs>(&call.arguments) {
                             policy.check_write(&args.path, &current_dir)
                         } else {
                             bondage::policy::PolicyMode::Ask
@@ -339,9 +339,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     bondage::policy::PolicyMode::Yes => Some(true),
                     bondage::policy::PolicyMode::No => Some(false),
                     bondage::policy::PolicyMode::Ask => {
-                        if name == "bash" {
+                        if call.name == "bash" {
                             Some(true)
-                        } else if tmux_orchestration::ask_approval(&name, &arguments) {
+                        } else if tmux_orchestration::ask_approval(&call.name, &call.arguments) {
                             Some(true)
                         } else {
                             None
@@ -351,14 +351,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if approved == Some(true) {
                     if policy_mode == bondage::policy::PolicyMode::Yes {
-                        println!("\n⚡ [Auto-approved by Policy] {} ({})", name, arguments.trim());
+                        println!("\n⚡ [Auto-approved by Policy] {} ({})", call.name, call.arguments.trim());
                     }
-                    println!("▶️ Executing {}...", name);
+                    println!("▶️ Executing {}...", call.name);
                     
-                    let tool_result = if name == "bash" {
-                        execute_bash_tmux(&id, &arguments, &current_dir, policy_mode, config.terminal.clone()).await
+                    let tool_result = if call.name == "bash" {
+                        execute_bash_tmux(&call.id, &call.arguments, &current_dir, policy_mode, config.terminal.clone()).await
                     } else {
-                        bondage::tools::execute_tool(&id, &name, &arguments, &current_dir).await
+                        bondage::tools::execute_tool(&call.id, &call.name, &call.arguments, &current_dir).await
                     };
                     
                     if let Message::ToolResponse { content, is_error, .. } = &tool_result {
@@ -380,8 +380,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
                     history.push(Message::ToolResponse {
-                        id,
-                        name,
+                        id: call.id,
+                        name: call.name,
                         content: reason,
                         is_error: true,
                     });

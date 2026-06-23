@@ -1,5 +1,5 @@
-use crate::{Message, ToolDefinition};
-use genai::chat::{ChatMessage, Tool, ToolCall, ToolResponse, MessageContent, ContentPart};
+use crate::{Message, ToolDefinition, ToolCall as BondageToolCall};
+use genai::chat::{ChatMessage, Tool, ToolCall as GenaiToolCall, ToolResponse, MessageContent, ContentPart};
 
 /// Group consecutive ModelToolRequests into a single assistant message with parallel tool calls,
 /// and map all other message variants to their genai equivalents.
@@ -10,7 +10,7 @@ pub fn to_genai_messages(messages: &[Message]) -> Vec<ChatMessage> {
     for msg in messages {
         // If we have pending tool calls from a previous iteration and the current message 
         // is NOT another tool call, we must commit them as one assistant message first.
-        if !matches!(msg, Message::ModelToolRequest { .. }) && !pending_tool_calls.is_empty() {
+        if !matches!(msg, Message::ModelToolRequest(_)) && !pending_tool_calls.is_empty() {
             let calls = std::mem::take(&mut pending_tool_calls);
             chat_msgs.push(ChatMessage::from(calls));
         }
@@ -25,11 +25,11 @@ pub fn to_genai_messages(messages: &[Message]) -> Vec<ChatMessage> {
             Message::ModelText(text) => {
                 chat_msgs.push(ChatMessage::assistant(text.clone()));
             }
-            Message::ModelToolRequest { id, name, arguments } => {
-                let args_val = serde_json::from_str(arguments).unwrap_or(serde_json::Value::Null);
-                pending_tool_calls.push(ToolCall {
-                    call_id: id.clone(),
-                    fn_name: name.clone(),
+            Message::ModelToolRequest(call) => {
+                let args_val = serde_json::from_str(&call.arguments).unwrap_or(serde_json::Value::Null);
+                pending_tool_calls.push(GenaiToolCall {
+                    call_id: call.id.clone(),
+                    fn_name: call.name.clone(),
                     fn_arguments: args_val,
                     thought_signatures: None,
                 });
@@ -88,11 +88,11 @@ pub fn from_genai_content(content: MessageContent) -> Vec<Message> {
     }
 
     for call in tool_calls {
-        messages.push(Message::ModelToolRequest {
+        messages.push(Message::ModelToolRequest(BondageToolCall {
             id: call.call_id,
             name: call.fn_name,
             arguments: call.fn_arguments.to_string(),
-        });
+        }));
     }
 
     messages
@@ -276,6 +276,17 @@ pub fn expand_tilde(path: &std::path::Path) -> std::path::PathBuf {
         }
     }
     path.to_path_buf()
+}
+
+/// Resolves a path string (which may be relative or contain `~`) to an absolute path.
+/// Relative paths are joined against `base_dir`.
+pub fn resolve_path(base_dir: &std::path::Path, path_str: &str) -> std::path::PathBuf {
+    let expanded = expand_tilde(std::path::Path::new(path_str));
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        base_dir.join(expanded)
+    }
 }
 
 #[cfg(test)]
