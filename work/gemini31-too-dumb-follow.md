@@ -1,0 +1,1 @@
+gemini-3.1 is too dumb to follow the rule of "you gotta write into the file, stupid" :D

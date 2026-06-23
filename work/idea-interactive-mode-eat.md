@@ -1,1 +1,3 @@
-idea: interactive mode that can eat not just a file, but a whole folder. Respecting gitignore, tree-sitting, watching file changes; if there are invocations for rope anywhere - those files get blobbed into the prompt (if too big -
+idea: interactive mode that can eat not just a file, but a whole folder. Respecting gitignore, tree-sitting, watching file changes; if there are invocations for rope anywhere - those files get blobbed into the prompt (if too big - we give just the surface; collapse biggest files first, until we fit)
+
+And further idea! it can be that the terminal that has rope-sitter opened has a policy of its own!!! "auto-yes" means "run rope whenever there's invocation for it" (we can maybe even have @subrope invocation that is file-local, not global?.. OOHH I LIKE THAT), but we can also have a quiet "hey so we scanned, and there are, like, 15 sites that call for rope, you wanna launch now, or later?"

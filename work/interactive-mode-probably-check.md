@@ -1,0 +1,2 @@
+interactive mode should probably also check against content hash, not just modification date!
+my reasoning: then we would be able to run the write tool at the end of the "iteraction", snapshot the content, and modification date - that's how we know rope has handed off the work back to the user. and it would also allow rope to leave marks for itself, BUT because we "snapshot" AFTER writes by rope, we will wait for save-over from the user to actually go running on it again

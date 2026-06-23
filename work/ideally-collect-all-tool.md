@@ -1,0 +1,1 @@
+ideally we should collect all tool calls (give the model instruction to batch reads together?), and if we end up trying to have lookup that ends up pulling 80% of the file - just send the whole file over?.. Or nah.. naaaah, that's trying to save peanuts tokens

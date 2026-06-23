@@ -1,0 +1,1 @@
+need a limit on tool calls count inside a single iteration, hard stop for the doom loops

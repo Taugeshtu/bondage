@@ -1,0 +1,1 @@
+doom loops: need to nudge model to like communicating with the user more, and being more comfortable with uncertainty

@@ -1,0 +1,1 @@
+Another failure mode: need to explain to AI better that a match to write-patch must be hard match. OR alternatively (or in addition to it?) add fuzzy matching, but with a very very high bar to clear.
