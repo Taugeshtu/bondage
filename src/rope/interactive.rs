@@ -53,16 +53,12 @@ pub async fn run_file_sitter(
     println!("👁️  File-Sitter active on: {}", canonical_session_path.display());
     println!("Waiting for saves containing `@rope`...");
 
-    let mut last_mtime = None;
+    // Initialize to "epoch + no hash" so that the first poll cycle
+    // treats the existing file content as "new" and checks for @rope.
+    // This enables auto-fire on launch if the session file already
+    // contains @rope triggers — no need for the user to re-save.
+    let mut last_mtime = Some(std::time::SystemTime::UNIX_EPOCH);
     let mut last_content_hash: Option<u64> = None;
-    if let Ok(metadata) = std::fs::metadata(&canonical_session_path) {
-        if let Ok(mtime) = metadata.modified() {
-            last_mtime = Some(mtime);
-            if let Ok(content) = std::fs::read_to_string(&canonical_session_path) {
-                last_content_hash = Some(content_hash(&content));
-            }
-        }
-    }
 
     let poll_interval = Duration::from_millis(300);
 

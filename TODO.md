@@ -48,4 +48,8 @@ rope:
 - [x] pretty-printing help
 - [ ] pretty-printing whole screen, maybe
 - [x] interactive mode
+	- [x] reacting to `@rope` marks
+	- [x] auto-firing when invoked
+	- [ ] unifiend expansion pipeline
+	- [ ] pipeline deduplication
 
