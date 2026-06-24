@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 use bondage::kit::ToolExecutor;
 use bondage::ToolResponse;
+use bondage::policy::Policy;
 use crate::tmux_orchestration::{execute_bash_tmux, ask_approval};
 
 /// Unified executor for both one-off (`main.rs`) and file-sitter (`interactive.rs`) modes.
@@ -19,6 +20,7 @@ use crate::tmux_orchestration::{execute_bash_tmux, ask_approval};
 pub struct RopeExecutor {
     pub terminal: Option<String>,
     pub session_file: Option<PathBuf>,
+    pub policy: Policy,
 }
 
 #[async_trait::async_trait]
@@ -26,13 +28,12 @@ impl ToolExecutor for RopeExecutor {
     async fn execute(
         &self,
         call: &bondage::ToolCall,
-        policy: &bondage::policy::Policy,
         current_dir: &Path,
     ) -> ToolResponse {
         let policy_mode = match call.name.as_str() {
             "lookup" => {
                 if let Ok(args) = serde_json::from_str::<bondage::tools::tool_lookup::LookupArgs>(&call.arguments) {
-                    policy.check_lookup(&args.target, current_dir)
+                    self.policy.check_lookup(&args.target, current_dir)
                 } else {
                     bondage::policy::PolicyMode::Ask
                 }
@@ -44,16 +45,16 @@ impl ToolExecutor for RopeExecutor {
                         if resolved == *sf {
                             bondage::policy::PolicyMode::Yes
                         } else {
-                            policy.check_write(&args.path, current_dir)
+                            self.policy.check_write(&args.path, current_dir)
                         }
                     } else {
-                        policy.check_write(&args.path, current_dir)
+                        self.policy.check_write(&args.path, current_dir)
                     }
                 } else {
                     bondage::policy::PolicyMode::Ask
                 }
             }
-            "bash" => policy.check_bash(),
+            "bash" => self.policy.check_bash(),
             _ => bondage::policy::PolicyMode::Ask,
         };
 

@@ -178,8 +178,9 @@ async fn run_agent_turn(
     let executor = RopeExecutor {
         terminal: config.terminal.clone(),
         session_file: Some(session_file.to_path_buf()),
+        policy: policy.clone(),
     };
-    step_agent(client, model, &mut history, &tools, None, &current_dir, &policy, &executor, &|token| {
+    step_agent(client, model, &mut history, &tools, None, &current_dir, &executor, &|token| {
         print!("{}", token);
         let _ = std::io::stdout().flush();
     }).await?;

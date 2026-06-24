@@ -27,6 +27,10 @@ use crate::ChatOptions;
 /// The executor is responsible for all console output related to tool execution
 /// (approval messages, status prints, output previews). `step_agent` only handles
 /// streaming token output via `on_token`.
+///
+/// **The executor owns its policy.** Construct the executor with the desired
+/// `Policy` — it is not passed per-call. This makes the executor self-contained
+/// and allows different executors to enforce different policies.
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
     /// Execute a tool call. Must always return `ToolResponse`.
@@ -34,7 +38,6 @@ pub trait ToolExecutor: Send + Sync {
     async fn execute(
         &self,
         call: &ToolCall,
-        policy: &Policy,
         current_dir: &Path,
     ) -> ToolResponse;
 }
@@ -55,7 +58,6 @@ pub async fn step_agent(
     tools: &[ToolDefinition],
     options: Option<ChatOptions>,
     current_dir: &Path,
-    policy: &Policy,
     executor: &dyn ToolExecutor,
     on_token: &(dyn Fn(String) + Send + Sync),
 ) -> Result<(), BondageError> {
@@ -69,7 +71,7 @@ pub async fn step_agent(
             history.push(msg.clone());
             if let Message::ModelToolRequest(call) = msg {
                 has_tool_calls = true;
-                let result = executor.execute(&call, policy, current_dir).await;
+                let result = executor.execute(&call, current_dir).await;
                 history.push(Message::ToolResponse(result));
             }
         }
@@ -100,32 +102,40 @@ fn stdin_ask_approval(tool_name: &str, args: &str) -> bool {
 ///
 /// For a richer experience (tmux integration, session-file auto-approve, etc.),
 /// implement `ToolExecutor` yourself.
-pub struct DefaultExecutor;
+pub struct DefaultExecutor {
+    pub policy: Policy,
+}
+
+impl DefaultExecutor {
+    /// Create a new `DefaultExecutor` with the given policy.
+    pub fn new(policy: Policy) -> Self {
+        DefaultExecutor { policy }
+    }
+}
 
 #[async_trait]
 impl ToolExecutor for DefaultExecutor {
     async fn execute(
         &self,
         call: &ToolCall,
-        policy: &Policy,
         current_dir: &Path,
     ) -> ToolResponse {
         let mode = match call.name.as_str() {
             "lookup" => {
                 if let Ok(args) = serde_json::from_str::<LookupArgs>(&call.arguments) {
-                    policy.check_lookup(&args.target, current_dir)
+                    self.policy.check_lookup(&args.target, current_dir)
                 } else {
                     crate::policy::PolicyMode::Ask
                 }
             }
             "write" => {
                 if let Ok(args) = serde_json::from_str::<WriteArgs>(&call.arguments) {
-                    policy.check_write(&args.path, current_dir)
+                    self.policy.check_write(&args.path, current_dir)
                 } else {
                     crate::policy::PolicyMode::Ask
                 }
             }
-            "bash" => policy.check_bash(),
+            "bash" => self.policy.check_bash(),
             _ => crate::policy::PolicyMode::Ask,
         };
 

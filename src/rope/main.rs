@@ -300,8 +300,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🤖 Invoking {}...", model);
 
-    let executor = RopeExecutor { terminal: config.terminal.clone(), session_file: None };
-    step_agent(&client, &model, &mut history, &tools, None, &current_dir, &policy, &executor, &|token| {
+    let executor = RopeExecutor { terminal: config.terminal.clone(), session_file: None, policy: policy.clone() };
+    step_agent(&client, &model, &mut history, &tools, None, &current_dir, &executor, &|token| {
         print!("{}", token);
         let _ = io::stdout().flush();
     }).await?;
