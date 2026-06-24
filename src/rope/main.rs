@@ -3,97 +3,13 @@ mod tmux_utils;
 mod tmux_orchestration;
 mod render;
 mod interactive;
+mod executor;
 
 use std::io::{self, Write};
 use bondage::Message;
-use bondage::kit::{step_agent, ToolExecutor};
+use bondage::kit::step_agent;
 use config::{Config, load_config, ensure_resources_installed};
-use tmux_orchestration::execute_bash_tmux;
-
-struct TmuxExecutor {
-    terminal: Option<String>,
-}
-
-#[async_trait::async_trait]
-impl ToolExecutor for TmuxExecutor {
-    async fn execute(
-        &self,
-        call: &bondage::ToolCall,
-        policy: &bondage::policy::Policy,
-        current_dir: &std::path::Path,
-    ) -> Message {
-        let policy_mode = match call.name.as_str() {
-            "lookup" => {
-                if let Ok(args) = serde_json::from_str::<bondage::tools::tool_lookup::LookupArgs>(&call.arguments) {
-                    policy.check_lookup(&args.target, current_dir)
-                } else {
-                    bondage::policy::PolicyMode::Ask
-                }
-            }
-            "write" => {
-                if let Ok(args) = serde_json::from_str::<bondage::tools::tool_write::WriteArgs>(&call.arguments) {
-                    policy.check_write(&args.path, current_dir)
-                } else {
-                    bondage::policy::PolicyMode::Ask
-                }
-            }
-            "bash" => policy.check_bash(),
-            _ => bondage::policy::PolicyMode::Ask,
-        };
-
-        let approved = match policy_mode {
-            bondage::policy::PolicyMode::Yes => Some(true),
-            bondage::policy::PolicyMode::No => Some(false),
-            bondage::policy::PolicyMode::Ask => {
-                if call.name == "bash" {
-                    Some(true)
-                } else if tmux_orchestration::ask_approval(&call.name, &call.arguments) {
-                    Some(true)
-                } else {
-                    None
-                }
-            }
-        };
-
-        if approved == Some(true) {
-            if policy_mode == bondage::policy::PolicyMode::Yes {
-                println!("\n⚡ [Auto-approved by Policy] {} ({})", call.name, call.arguments.trim());
-            }
-            println!("▶️ Executing {}...", call.name);
-
-            let tool_result = if call.name == "bash" {
-                execute_bash_tmux(&call.id, &call.arguments, current_dir, policy_mode, self.terminal.clone()).await
-            } else {
-                bondage::tools::execute_tool(&call.id, &call.name, &call.arguments, current_dir).await
-            };
-
-            if let Message::ToolResponse { content, is_error, .. } = &tool_result {
-                let status = if *is_error { "ERROR" } else { "SUCCESS" };
-                let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
-                println!("✅ [{}] Output preview:\n{}\n...", status, preview);
-            }
-
-            tool_result
-        } else {
-            let reason = match policy_mode {
-                bondage::policy::PolicyMode::No => {
-                    println!("❌ [Blocked by Policy] Rejection sent to agent.");
-                    "Permission Denied: execution blocked by safety policy.".to_string()
-                }
-                _ => {
-                    println!("❌ Denied.");
-                    "Permission Denied by User".to_string()
-                }
-            };
-            Message::ToolResponse {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                content: reason,
-                is_error: true,
-            }
-        }
-    }
-}
+use executor::RopeExecutor;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -384,7 +300,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🤖 Invoking {}...", model);
 
-    let executor = TmuxExecutor { terminal: config.terminal.clone() };
+    let executor = RopeExecutor { terminal: config.terminal.clone(), session_file: None };
     step_agent(&client, &model, &mut history, &tools, None, &current_dir, &policy, &executor, &|token| {
         print!("{}", token);
         let _ = io::stdout().flush();
