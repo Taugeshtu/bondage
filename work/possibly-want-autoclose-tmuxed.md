@@ -1,0 +1,1 @@
+Possibly want to NOT auto-close the tmuxed terminal for bash commands, but instead keep it opened. If it's possible for the user to close the window without killing the background tmux session or whatever it's called
