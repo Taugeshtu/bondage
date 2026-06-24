@@ -1,5 +1,5 @@
 use crate::{Message, ToolDefinition, ToolCall as BondageToolCall};
-use genai::chat::{ChatMessage, Tool, ToolCall as GenaiToolCall, ToolResponse, MessageContent, ContentPart};
+use genai::chat::{ChatMessage, Tool, ToolCall as GenaiToolCall, ToolResponse as GenaiToolResponse, MessageContent, ContentPart};
 
 /// Group consecutive ModelToolRequests into a single assistant message with parallel tool calls,
 /// and map all other message variants to their genai equivalents.
@@ -34,8 +34,8 @@ pub fn to_genai_messages(messages: &[Message]) -> Vec<ChatMessage> {
                     thought_signatures: None,
                 });
             }
-            Message::ToolResponse { id, name: _, content, is_error: _ } => {
-                let tool_res = ToolResponse::new(id.clone(), content.clone());
+            Message::ToolResponse(tr) => {
+                let tool_res = GenaiToolResponse::new(tr.id.clone(), tr.content.clone());
                 chat_msgs.push(ChatMessage::from(tool_res));
             }
             Message::Error(text) => {

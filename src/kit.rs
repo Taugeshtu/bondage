@@ -12,7 +12,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use async_trait::async_trait;
 use crate::{
-    Message, ToolCall, ToolDefinition, BondageError, step_stream,
+    Message, ToolCall, ToolDefinition, ToolResponse, BondageError, step_stream,
     policy::Policy,
     tools::{execute_tool, tool_lookup::LookupArgs, tool_write::WriteArgs},
 };
@@ -22,21 +22,21 @@ use crate::ChatOptions;
 ///   1. Compute policy mode for this tool call
 ///   2. Handle approval (auto-approve for Yes, block for No, ask for Ask)
 ///   3. Execute the tool (bring your own bash impl, or use bondage's execute_tool)
-///   4. Return a `Message::ToolResponse` (success or error)
+///   4. Return a `ToolResponse` (success or error)
 ///
 /// The executor is responsible for all console output related to tool execution
 /// (approval messages, status prints, output previews). `step_agent` only handles
 /// streaming token output via `on_token`.
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
-    /// Execute a tool call. Must always return `Message::ToolResponse`.
+    /// Execute a tool call. Must always return `ToolResponse`.
     /// Catch all errors internally and return them as `is_error: true` responses.
     async fn execute(
         &self,
         call: &ToolCall,
         policy: &Policy,
         current_dir: &Path,
-    ) -> Message;
+    ) -> ToolResponse;
 }
 
 /// The kit's agentic loop. Calls `step_stream` in a loop, extracts tool calls,
@@ -70,7 +70,7 @@ pub async fn step_agent(
             if let Message::ModelToolRequest(call) = msg {
                 has_tool_calls = true;
                 let result = executor.execute(&call, policy, current_dir).await;
-                history.push(result);
+                history.push(Message::ToolResponse(result));
             }
         }
         if !has_tool_calls {
@@ -109,7 +109,7 @@ impl ToolExecutor for DefaultExecutor {
         call: &ToolCall,
         policy: &Policy,
         current_dir: &Path,
-    ) -> Message {
+    ) -> ToolResponse {
         let mode = match call.name.as_str() {
             "lookup" => {
                 if let Ok(args) = serde_json::from_str::<LookupArgs>(&call.arguments) {
@@ -132,7 +132,7 @@ impl ToolExecutor for DefaultExecutor {
         match mode {
             crate::policy::PolicyMode::No => {
                 println!("❌ [Blocked by Policy] Rejection sent to agent.");
-                Message::ToolResponse {
+                ToolResponse {
                     id: call.id.clone(),
                     name: call.name.clone(),
                     content: "Permission Denied: execution blocked by safety policy.".to_string(),
@@ -143,9 +143,9 @@ impl ToolExecutor for DefaultExecutor {
                 println!("\n⚡ [Auto-approved by Policy] {} ({})", call.name, call.arguments.trim());
                 println!("▶️ Executing {}...", call.name);
                 let result = execute_tool(&call.id, &call.name, &call.arguments, current_dir).await;
-                if let Message::ToolResponse { content, is_error, .. } = &result {
-                    let status = if *is_error { "ERROR" } else { "SUCCESS" };
-                    let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
+                {
+                    let status = if result.is_error { "ERROR" } else { "SUCCESS" };
+                    let preview: String = result.content.lines().take(5).collect::<Vec<_>>().join("\n");
                     println!("✅ [{}] Output preview:\n{}\n...", status, preview);
                 }
                 result
@@ -162,15 +162,15 @@ impl ToolExecutor for DefaultExecutor {
                 if approved {
                     println!("▶️ Executing {}...", call.name);
                     let result = execute_tool(&call.id, &call.name, &call.arguments, current_dir).await;
-                    if let Message::ToolResponse { content, is_error, .. } = &result {
-                        let status = if *is_error { "ERROR" } else { "SUCCESS" };
-                        let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
+                    {
+                        let status = if result.is_error { "ERROR" } else { "SUCCESS" };
+                        let preview: String = result.content.lines().take(5).collect::<Vec<_>>().join("\n");
                         println!("✅ [{}] Output preview:\n{}\n...", status, preview);
                     }
                     result
                 } else {
                     println!("❌ Denied.");
-                    Message::ToolResponse {
+                    ToolResponse {
                         id: call.id.clone(),
                         name: call.name.clone(),
                         content: "Permission Denied by User".to_string(),

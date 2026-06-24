@@ -8,8 +8,8 @@
 //! auto-approve writes targeting the session file itself.
 
 use std::path::{Path, PathBuf};
-use bondage::Message;
 use bondage::kit::ToolExecutor;
+use bondage::ToolResponse;
 use crate::tmux_orchestration::{execute_bash_tmux, ask_approval};
 
 /// Unified executor for both one-off (`main.rs`) and file-sitter (`interactive.rs`) modes.
@@ -28,7 +28,7 @@ impl ToolExecutor for RopeExecutor {
         call: &bondage::ToolCall,
         policy: &bondage::policy::Policy,
         current_dir: &Path,
-    ) -> Message {
+    ) -> ToolResponse {
         let policy_mode = match call.name.as_str() {
             "lookup" => {
                 if let Ok(args) = serde_json::from_str::<bondage::tools::tool_lookup::LookupArgs>(&call.arguments) {
@@ -83,11 +83,10 @@ impl ToolExecutor for RopeExecutor {
                 bondage::tools::execute_tool(&call.id, &call.name, &call.arguments, current_dir).await
             };
 
-            if let Message::ToolResponse { content, is_error, .. } = &tool_result {
-                let status = if *is_error { "ERROR" } else { "SUCCESS" };
-                let preview: String = content.lines().take(5).collect::<Vec<_>>().join("\n");
-                println!("✅ [{}] Output preview:\n{}\n...", status, preview);
-            }
+            let tr = &tool_result;
+            let status = if tr.is_error { "ERROR" } else { "SUCCESS" };
+            let preview: String = tr.content.lines().take(5).collect::<Vec<_>>().join("\n");
+            println!("✅ [{}] Output preview:\n{}\n...", status, preview);
 
             tool_result
         } else {
@@ -101,7 +100,7 @@ impl ToolExecutor for RopeExecutor {
                     "Permission Denied by User".to_string()
                 }
             };
-            Message::ToolResponse {
+            ToolResponse {
                 id: call.id.clone(),
                 name: call.name.clone(),
                 content: reason,

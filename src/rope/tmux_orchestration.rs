@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use bondage::Message;
+use bondage::ToolResponse;
 use crate::tmux_utils::{self, TerminalHandle};
 
 pub fn ask_approval(tool_name: &str, args: &str) -> bool {
@@ -43,12 +43,12 @@ pub async fn execute_bash_tmux(
     current_dir: &std::path::Path,
     policy_mode: bondage::policy::PolicyMode,
     custom_terminal: Option<String>,
-) -> Message {
+) -> ToolResponse {
     let args: Result<bondage::tools::tool_bash::BashArgs, _> = serde_json::from_str(arguments);
     let command_to_run = match args {
         Ok(a) => a.command,
         Err(e) => {
-            return Message::ToolResponse {
+            return ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content: format!("Failed to parse arguments: {}", e),
@@ -64,7 +64,7 @@ pub async fn execute_bash_tmux(
         // If the safety policy is Ask, we must prompt the user inline because we can't use the tmux-attach approval mechanism
         if policy_mode == bondage::policy::PolicyMode::Ask {
             if !ask_approval("bash", arguments) {
-                return Message::ToolResponse {
+                return ToolResponse {
                     id: id.to_string(),
                     name: "bash".to_string(),
                     content: "Permission Denied: command execution cancelled by user.".to_string(),
@@ -79,13 +79,13 @@ pub async fn execute_bash_tmux(
         ).await;
         
         return match baseline_res {
-            Ok(content) => Message::ToolResponse {
+            Ok(content) => ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content,
                 is_error: false,
             },
-            Err(e) => Message::ToolResponse {
+            Err(e) => ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content: e.to_string(),
@@ -106,7 +106,7 @@ pub async fn execute_bash_tmux(
         log_debug("Starting new tmux session...");
         if let Err(e) = tmux_utils::start_session(&session_name, current_dir) {
             log_debug(&format!("Failed to start session: {}", e));
-            return Message::ToolResponse {
+            return ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content: format!("Failed to start tmux session: {}", e),
@@ -146,7 +146,7 @@ pub async fn execute_bash_tmux(
     log_debug(&format!("Sending command literal: {}", command_to_run));
     if let Err(e) = tmux_utils::send_command_literal(&session_name, &command_to_run) {
         log_debug(&format!("Failed to send command literal: {}", e));
-        return Message::ToolResponse {
+        return ToolResponse {
             id: id.to_string(),
             name: "bash".to_string(),
             content: format!("Failed to send command to tmux: {}", e),
@@ -160,7 +160,7 @@ pub async fn execute_bash_tmux(
         command_submitted = true;
         if let Err(e) = tmux_utils::send_control_key(&session_name, "C-m") {
             log_debug(&format!("Failed to send C-m: {}", e));
-            return Message::ToolResponse {
+            return ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content: format!("Failed to automatically execute command in tmux: {}", e),
@@ -182,7 +182,7 @@ pub async fn execute_bash_tmux(
             }
             Err(e) => {
                 log_debug(&format!("Failed to pop terminal: {}", e));
-                return Message::ToolResponse {
+                return ToolResponse {
                     id: id.to_string(),
                     name: "bash".to_string(),
                     content: format!(
@@ -234,7 +234,7 @@ pub async fn execute_bash_tmux(
             // User approved, send Enter key to run the command
             if let Err(e) = tmux_utils::send_control_key(&session_name, "C-m") {
                 log_debug(&format!("Failed to send C-m: {}", e));
-                return Message::ToolResponse {
+                return ToolResponse {
                     id: id.to_string(),
                     name: "bash".to_string(),
                     content: format!("Failed to execute command in tmux: {}", e),
@@ -245,7 +245,7 @@ pub async fn execute_bash_tmux(
             log_debug("Inline approval denied. Sending C-c and exiting...");
             // User denied, send Ctrl+C to clear the session
             let _ = tmux_utils::send_control_key(&session_name, "C-c");
-            return Message::ToolResponse {
+            return ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content: "Permission Denied: command execution cancelled by user.".to_string(),
@@ -296,7 +296,7 @@ pub async fn execute_bash_tmux(
                 let _ = tmux_utils::close_terminal(h);
             }
             
-            return Message::ToolResponse {
+            return ToolResponse {
                 id: id.to_string(),
                 name: "bash".to_string(),
                 content: "Permission Denied: terminal window/split closed or cancelled by user.".to_string(),
@@ -345,7 +345,7 @@ pub async fn execute_bash_tmux(
 
     log_debug("Tool execution successfully completed.");
 
-    Message::ToolResponse {
+    ToolResponse {
         id: id.to_string(),
         name: "bash".to_string(),
         content: output_content,

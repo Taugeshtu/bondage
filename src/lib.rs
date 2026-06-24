@@ -20,18 +20,24 @@ pub struct ToolCall {
     pub arguments: String, // JSON payload string
 }
 
+/// The result of executing a tool call. Extracted as a standalone struct so that
+/// `ToolExecutor::execute` can return `ToolResponse` directly (not `Message`),
+/// enforcing at the type level that executors always produce a tool response.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolResponse {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+    pub is_error: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Message {
     System(String),
     User(String),
     ModelText(String),
     ModelToolRequest(ToolCall),
-    ToolResponse {
-        id: String,
-        name: String,
-        content: String,
-        is_error: bool,
-    },
+    ToolResponse(ToolResponse),
     Error(String), // Model-level generation failures (e.g. content block)
 }
 
